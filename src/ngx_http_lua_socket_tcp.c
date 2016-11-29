@@ -2837,7 +2837,7 @@ ngx_http_lua_socket_read_handler(ngx_http_request_t *r,
                    "lua tcp socket read handler");
 
     if (c->read->timedout) {
-        c->read->timedout = 0;
+//        c->read->timedout = 0;
 
         llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
 
