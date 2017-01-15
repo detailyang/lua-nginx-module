@@ -22,6 +22,7 @@ static int ngx_http_lua_socket_tcp(lua_State *L);
 static int ngx_http_lua_socket_tcp_connect(lua_State *L);
 #if (NGX_HTTP_SSL)
 static int ngx_http_lua_socket_tcp_sslhandshake(lua_State *L);
+static int ngx_http_lua_socket_tcp_setsslcert(lua_State *L);
 #endif
 static int ngx_http_lua_socket_tcp_receive(lua_State *L);
 static int ngx_http_lua_socket_tcp_send(lua_State *L);
@@ -284,6 +285,9 @@ ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
 
     lua_pushcfunction(L, ngx_http_lua_socket_tcp_sslhandshake);
     lua_setfield(L, -2, "sslhandshake");
+
+    lua_pushcfunction(L, ngx_http_lua_socket_tcp_setsslcert);
+    lua_setfield(L, -2, "setsslcert");
 
 #endif
 
@@ -1199,6 +1203,123 @@ ngx_http_lua_socket_conn_error_retval_handler(ngx_http_request_t *r,
 
 
 #if (NGX_HTTP_SSL)
+
+static int
+ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
+{
+    int                      n;
+    char                    *err;
+    BIO                     *bio;
+    X509                    *x509;
+    EVP_PKEY                *pkey;
+    ngx_str_t                cert, priv_key;
+    const char              *password;
+    ngx_http_request_t      *r;
+
+    ngx_http_lua_socket_tcp_upstream_t  *u;
+
+    /* Lua function arguments: self ,cert ,priv_key [,password] */
+
+    n = lua_gettop(L);
+    if (n < 1 || n > 4) {
+        return luaL_error(L, "ngx.socket setsslcert expecting 1 ~ 4 "
+                          "arguments (including the object), but seen %d", n);
+    }
+
+    r = ngx_http_lua_get_req(L);
+    if (r == NULL) {
+        return luaL_error(L, "no request found");
+    }
+
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "lua tcp socket ssl set certificate");
+
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    lua_rawgeti(L, 1, SOCKET_CTX_INDEX);
+    u = lua_touserdata(L, -1);
+
+    if (u->request != r) {
+        return luaL_error(L, "bad request");
+    }
+
+    cert.data = (u_char *) luaL_checklstring(L, 2, &cert.len);
+    priv_key.data = (u_char *) luaL_checklstring(L, 3, &priv_key.len);
+
+    if (n == 4) {
+        password = luaL_checkstring(L, 4);
+    }
+
+    bio = BIO_new_mem_buf((char *)cert.data, cert.len);
+    if(bio == NULL) {
+        err = "BIO_new_mem_buf() failed";
+        goto failed;
+    }
+
+    /*
+    * Reading the PEM-formatted certificate from memory into an X509
+    */
+
+    x509 = PEM_read_bio_X509(bio, NULL, 0, NULL);
+    if(x509 == NULL) {
+        BIO_free(bio);
+        err = "PEM_read_bio_X509() failed";
+        goto failed;
+    }
+
+    BIO_free(bio);
+
+    if (!SSL_CTX_use_certificate(u->conf->ssl->ctx, x509)) {
+        X509_free(x509);
+        err = "SSL_CTX_use_certificate() failed";
+        goto failed;
+    }
+
+    X509_free(x509);
+
+    bio = BIO_new_mem_buf((char *)priv_key.data, priv_key.len);
+    if(bio == NULL) {
+        err = "BIO_new_mem_buf() failed";
+        goto failed;
+    }
+
+    if (n == 4) {
+        pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, (void *)password);
+
+    } else {
+        pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+    }
+
+    if (pkey == NULL) {
+        BIO_free(bio);
+        err = "PEM_read_bio_PrivateKey() failed";
+        goto failed;
+    }
+
+    BIO_free(bio);
+
+    if (!SSL_CTX_use_PrivateKey(u->conf->ssl->ctx, pkey)) {
+        EVP_PKEY_free(pkey);
+        err = "SSL_CTX_use_PrivateKey() failed";
+        goto failed;
+    }
+
+    EVP_PKEY_free(pkey);
+
+    lua_pushinteger(L, 1);
+    return 1;
+
+failed:
+
+    ngx_ssl_error(NGX_LOG_ERR, r->connection->log, 0, err);
+    ERR_clear_error();
+
+    lua_pushnil(L);
+    lua_pushstring(L, err);
+
+    return 2;
+}
+
 
 static int
 ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)

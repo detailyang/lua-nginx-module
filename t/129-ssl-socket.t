@@ -1709,7 +1709,7 @@ received: Server: nginx
 received: Content-Type: text/plain
 received: Content-Length: 4
 received: Connection: close
-received: 
+received:
 received: foo
 close: 1 nil
 
@@ -1814,7 +1814,7 @@ received: Server: nginx
 received: Content-Type: text/plain
 received: Content-Length: 4
 received: Connection: close
-received: 
+received:
 received: foo
 close: 1 nil
 
@@ -2469,7 +2469,7 @@ received: Server: nginx
 received: Content-Type: text/plain
 received: Content-Length: 4
 received: Connection: close
-received: 
+received:
 received: foo
 close: 1 nil
 
@@ -2615,6 +2615,37 @@ GET /t
 --- ignore_response
 --- error_log eval
 qr/\[error\] .* ngx.socket connect: expecting 1 ~ 5 arguments \(including the object\), but seen 0/
+--- no_error_log
+[alert]
+--- timeout: 5
+
+
+
+=== TEST 33: setsslcert, too many arguments
+--- config
+    resolver $TEST_NGINX_RESOLVER ipv6=off;
+    location /t {
+        content_by_lua_block {
+            local sock = ngx.socket.tcp()
+            sock:settimeout(2000)
+
+            local ok, err = sock:connect("g.sregex.org", 443)
+            if not ok then
+                ngx.say("failed to connect: ", err)
+                return
+            end
+
+            ngx.say("connected: ", ok)
+
+            local ok, err = sock.setsslcert()
+        }
+    }
+
+--- request
+GET /t
+--- ignore_response
+--- error_log eval
+qr/\[error\] .* ngx.socket setsslcert: expecting 1 ~ 4 arguments \(including the object\), but seen 0/
 --- no_error_log
 [alert]
 --- timeout: 5
