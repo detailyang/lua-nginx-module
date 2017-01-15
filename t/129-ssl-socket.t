@@ -4,7 +4,7 @@ use Test::Nginx::Socket::Lua;
 
 repeat_each(2);
 
-plan tests => repeat_each() * 226;
+plan tests => repeat_each() * 227;
 
 $ENV{TEST_NGINX_HTML_DIR} ||= html_dir();
 
@@ -2698,7 +2698,7 @@ qr/\[error\] .* ngx.socket setsslcert: expecting 1 ~ 4 arguments \(including the
 
 
 
-=== TEST 34: setsslcert should after tcpsock:connect
+=== TEST 34: setsslcert should return error on closed connection
 --- config
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
@@ -2736,8 +2736,46 @@ failed to set ssl certificate: closed
 --- timeout: 5
 
 
+=== TEST 35: setsslcert should return error on sslhandshaked connection
+--- config
+    server_tokens off;
+    resolver $TEST_NGINX_RESOLVER ipv6=off;
+    lua_ssl_trusted_certificate ../html/ca.crt;
 
-=== TEST 35: setsslcert send client certificate with nopassword private key
+    location /t {
+        content_by_lua_block {
+            function read_file(file)
+                local f = io.open(file, "rb")
+                local content = f:read("*all")
+                f:close()
+                return content
+            end
+            
+            local sock = ngx.socket.tcp()
+            sock:settimeout(3000)
+                
+            local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
+            local key = read_file("$TEST_NGINX_HTML_DIR/client.unsecure.key")
+            
+            local ok, err = sock:setsslcert(cert, key)
+            if not ok then
+                ngx.say("failed to set ssl certificate: ", err)
+                return 
+            end
+        }
+    }
+
+--- request
+GET /t
+--- response_body
+failed to set ssl certificate: sslhandshaked
+
+--- user_files eval: $::certfiles
+--- timeout: 5
+
+
+
+=== TEST 36: setsslcert send client certificate with nopassword private key
 --- http_config eval: $::sslhttpconfig
 --- config
     server_tokens off;
@@ -2827,7 +2865,7 @@ close: 1 nil
 
 
 
-=== TEST 36: setsslcert send client certificate with password private key
+=== TEST 37: setsslcert send client certificate with password private key
 --- http_config eval: $::sslhttpconfig
 --- config
     server_tokens off;
@@ -2917,7 +2955,7 @@ close: 1 nil
 
 
 
-=== TEST 37: setsslcert set ssl wrong formated certificate
+=== TEST 38: setsslcert set ssl wrong formated certificate
 --- http_config eval: $::sslhttpconfig
 --- config
     server_tokens off;
@@ -2969,7 +3007,7 @@ qr/.*PEM routines:PEM_read_bio:no start line:Expecting: CERTIFICATE.*/
 
 
 
-=== TEST 38: setsslcert set ssl unmatched private key 
+=== TEST 39: setsslcert set ssl unmatched private key 
 --- http_config eval: $::sslhttpconfig
 --- config
     server_tokens off;
@@ -3018,3 +3056,4 @@ failed to set ssl certificate: SSL_CTX_use_PrivateKey() failed
 --- error_log eval
 qr/.*x509 certificate routines:X509_check_private_key:key values mismatch.*/
 --- timeout: 5
+

@@ -1214,6 +1214,7 @@ ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
     EVP_PKEY                *pkey;
     ngx_str_t                cert, priv_key;
     const char              *password;
+    ngx_connection_t        *c;
     ngx_http_request_t      *r;
 
     ngx_http_lua_socket_tcp_upstream_t  *u;
@@ -1251,6 +1252,13 @@ ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
 
     if (u->request != r) {
         return luaL_error(L, "bad request");
+    }
+    
+    c = u->peer.connection;
+    if (c->ssl && c->ssl->handshaked) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "sslhandshaked");
+        return 2;
     }
 
     cert.data = (u_char *) luaL_checklstring(L, 2, &cert.len);
