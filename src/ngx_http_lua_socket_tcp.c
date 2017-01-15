@@ -1222,7 +1222,7 @@ ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
 
     n = lua_gettop(L);
     if (n < 1 || n > 4) {
-        return luaL_error(L, "ngx.socket setsslcert expecting 1 ~ 4 "
+        return luaL_error(L, "ngx.socket setsslcert: expecting 1 ~ 4 "
                           "arguments (including the object), but seen %d", n);
     }
 
@@ -1238,6 +1238,16 @@ ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
 
     lua_rawgeti(L, 1, SOCKET_CTX_INDEX);
     u = lua_touserdata(L, -1);
+    
+    if (u == NULL
+        || u->peer.connection == NULL
+        || u->read_closed
+        || u->write_closed)
+    {
+        lua_pushnil(L);
+        lua_pushliteral(L, "closed");
+        return 2;
+    }
 
     if (u->request != r) {
         return luaL_error(L, "bad request");
