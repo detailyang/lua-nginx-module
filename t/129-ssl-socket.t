@@ -1,6 +1,7 @@
 # vim:set ft= ts=4 sw=4 et fdm=marker:
 
 use Test::Nginx::Socket::Lua;
+use Digest::MD5 qw(md5_hex);
 
 repeat_each(2);
 
@@ -34,6 +35,7 @@ our $TestCRL = read_file("t/cert/test.crl");
 our $clientKey = read_file("t/cert/client.key");
 our $clientUnsecureKey = read_file("t/cert/client.unsecure.key");
 our $clientCrt = read_file("t/cert/client.crt");
+our $clientCrtMd5 = md5_hex($clientCrt);
 our $serverKey = read_file("t/cert/server.key");
 our $serverUnsecureKey = read_file("t/cert/server.unsecure.key");
 our $serverCrt = read_file("t/cert/server.crt");
@@ -49,10 +51,19 @@ server {
     ssl_verify_client on;
 
     server_tokens off;
+    
     location / {
         default_type 'text/plain';
         content_by_lua_block {
             ngx.say("foo")
+        }
+        more_clear_headers Date;
+    }
+    
+    location /cert {
+        default_type 'text/plain';
+        content_by_lua_block {
+            ngx.say(ngx.md5(ngx.var.ssl_client_raw_cert))
         }
         more_clear_headers Date;
     }
@@ -2753,6 +2764,17 @@ failed to set ssl certificate: closed
             
             local sock = ngx.socket.tcp()
             sock:settimeout(3000)
+            local ok, err = sock:connect("127.0.0.1", 1983)
+            if not ok then
+                ngx.say("failed to connect: ", err)
+                return
+            end
+            
+            local sess, err = sock:sslhandshake(nil, nil, true)
+            if not sess then
+                ngx.say("failed to do SSL handshake: ", err)
+                return
+            end
                 
             local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
             local key = read_file("$TEST_NGINX_HTML_DIR/client.unsecure.key")
@@ -2819,7 +2841,7 @@ failed to set ssl certificate: sslhandshaked
 
                 ngx.say("ssl handshake: ", type(sess))
 
-                local req = "GET /foo HTTP/1.0\r\nHost: server\r\nConnection: close\r\n\r\n"
+                local req = "GET /cert HTTP/1.0\r\nHost: server\r\nConnection: close\r\n\r\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -2847,18 +2869,19 @@ failed to set ssl certificate: sslhandshaked
 
 --- request
 GET /t
---- response_body
-connected: 1
+--- response_body eval
+"connected: 1
 ssl handshake: userdata
 sent http request: 54 bytes.
 received: HTTP/1.1 200 OK
 received: Server: nginx
 received: Content-Type: text/plain
-received: Content-Length: 4
+received: Content-Length: 33
 received: Connection: close
 received: 
-received: foo
+received: $::clientCrtMd5
 close: 1 nil
+"
 
 --- user_files eval: $::certfiles
 --- timeout: 5
@@ -2909,7 +2932,7 @@ close: 1 nil
 
                 ngx.say("ssl handshake: ", type(sess))
 
-                local req = "GET /foo HTTP/1.0\r\nHost: server\r\nConnection: close\r\n\r\n"
+                local req = "GET /cert HTTP/1.0\r\nHost: server\r\nConnection: close\r\n\r\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -2937,18 +2960,19 @@ close: 1 nil
 
 --- request
 GET /t
---- response_body
-connected: 1
+--- response_body eval
+"connected: 1
 ssl handshake: userdata
 sent http request: 54 bytes.
 received: HTTP/1.1 200 OK
 received: Server: nginx
 received: Content-Type: text/plain
-received: Content-Length: 4
+received: Content-Length: 33
 received: Connection: close
 received: 
-received: foo
+received: $::clientCrtMd5
 close: 1 nil
+"
 
 --- user_files eval: $::certfiles
 --- timeout: 5

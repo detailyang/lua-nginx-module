@@ -1255,7 +1255,7 @@ ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
     }
     
     c = u->peer.connection;
-    if (c->ssl && c->ssl->handshaked) {
+    if (c->ssl) {
         lua_pushnil(L);
         lua_pushliteral(L, "sslhandshaked");
         return 2;
