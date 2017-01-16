@@ -12,7 +12,6 @@
 
 #if (NGX_HTTP_SSL)
 
-
 int ngx_http_lua_ssl_ctx_index = -1;
 
 
@@ -34,20 +33,44 @@ ngx_http_lua_ssl_init(ngx_log_t *log)
 }
 
 
+int
+ngx_http_lua_ssl_password_callback(char *buf, int size, int rwflag, 
+    void *userdata)
+{
+    ngx_str_t *pwd = userdata;
+
+    if (rwflag) {
+        ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0,
+                      "ngx_ssl_password_callback() is called for encryption");
+        return 0;
+    }
+
+    if (pwd->len > (size_t) size) {
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                      "password is truncated to %d bytes", size);
+    } else {
+        size = pwd->len;
+    }
+
+    ngx_memcpy(buf, pwd->data, size);
+
+    return size;
+}
+
+
 ngx_int_t
-ngx_http_lua_ssl_certificate(ngx_ssl_t *ssl, ngx_str_t *cert, ngx_str_t *key, 
-    ngx_str_t *password, ngx_log_t *log)
+ngx_http_lua_ssl_certificate(ngx_ssl_t *ssl, ngx_str_t *cert, 
+    ngx_str_t *priv_key, ngx_str_t *password, ngx_log_t *log)
 {
     BIO                     *cbio = NULL;
     BIO                     *pbio = NULL;
     X509                    *x509 = NULL;
     EVP_PKEY                *pkey = NULL;
-    ngx_int_t                rc = NGX_OK;
+    ngx_int_t                rc = NGX_ERROR;
 
     cbio = BIO_new_mem_buf((char *)cert->data, cert->len);
     if(cbio == NULL) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "BIO_new_mem_buf() failed");
-        rc = NGX_ERROR;
         goto done;
     }
 
@@ -58,40 +81,40 @@ ngx_http_lua_ssl_certificate(ngx_ssl_t *ssl, ngx_str_t *cert, ngx_str_t *key,
     x509 = PEM_read_bio_X509(cbio, NULL, 0, NULL);
     if(x509 == NULL) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "PEM_read_bio_X509() failed");
-        rc = NGX_ERROR;
         goto done;
     }
 
     if (!SSL_CTX_use_certificate(ssl->ctx, x509)) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "SSL_CTX_use_certificate() failed");
-        rc = NGX_ERROR;
         goto done; 
     }
 
     pbio = BIO_new_mem_buf((char *)priv_key->data, priv_key->len);
     if(pbio == NULL) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "BIO_new_mem_buf() failed");
-        rc = NGX_ERROR;
         goto done; 
     }
 
     if (password->len > 0) {
-        SSL_CTX_set_default_passwd_cb(ssl->ctx, ngx_ssl_password_callback);
+        SSL_CTX_set_default_passwd_cb(ssl->ctx,
+                                      ngx_http_lua_ssl_password_callback);
         SSL_CTX_set_default_passwd_cb_userdata(ssl->ctx, (void *)password);
     }
 
     pkey = PEM_read_bio_PrivateKey(pbio, NULL, NULL, NULL);
     if (pkey == NULL) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "PEM_read_bio_PrivateKey() failed");
-        rc = NGX_ERROR;
         goto done; 
     }
 
     if (!SSL_CTX_use_PrivateKey(ssl->ctx, pkey)) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "SSL_CTX_use_PrivateKey() failed");
-        rc = NGX_ERROR;
         goto done; 
     }
+    
+    rc = NGX_OK;
+    
+done:
 
     if (pkey) {
         EVP_PKEY_free(pkey);
@@ -116,30 +139,6 @@ ngx_http_lua_ssl_certificate(ngx_ssl_t *ssl, ngx_str_t *cert, ngx_str_t *key,
     SSL_CTX_set_default_passwd_cb(ssl->ctx, NULL);
     
     return rc;
-}
-
-
-static int
-ngx_ssl_password_callback(char *buf, int size, int rwflag, void *userdata)
-{
-    ngx_str_t *pwd = userdata;
-
-    if (rwflag) {
-        ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0,
-                      "ngx_ssl_password_callback() is called for encryption");
-        return 0;
-    }
-
-    if (pwd->len > (size_t) size) {
-        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                      "password is truncated to %d bytes", size);
-    } else {
-        size = pwd->len;
-    }
-
-    ngx_memcpy(buf, pwd->data, size);
-
-    return size;
 }
 
 #endif /* NGX_HTTP_SSL */

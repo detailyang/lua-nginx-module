@@ -1268,7 +1268,7 @@ ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
     }
     
     rc = ngx_http_lua_ssl_certificate(u->conf->ssl, &cert, &priv_key,
-                                      &password);
+                                      &password, r->connection->log);
     if (rc != NGX_OK) {
         lua_pushnil(L);
         lua_pushliteral(L, "failed to set ssl certificate");
