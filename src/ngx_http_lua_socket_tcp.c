@@ -1209,7 +1209,7 @@ static int
 ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
 {
     ngx_str_t                            password = ngx_null_string;
-    
+
     int                                  n;
     ngx_int_t                            rc;
     ngx_str_t                            cert, priv_key;
@@ -1237,7 +1237,7 @@ ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
 
     lua_rawgeti(L, 1, SOCKET_CTX_INDEX);
     u = lua_touserdata(L, -1);
-    
+
     if (u == NULL
         || u->peer.connection == NULL
         || u->read_closed
@@ -1251,9 +1251,9 @@ ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
     if (u->request != r) {
         return luaL_error(L, "bad request");
     }
-    
+
     c = u->peer.connection;
-    
+
     if (c->ssl) {
         lua_pushnil(L);
         lua_pushliteral(L, "sslhandshaked");
@@ -1262,11 +1262,11 @@ ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
 
     cert.data = (u_char *) luaL_checklstring(L, 2, &cert.len);
     priv_key.data = (u_char *) luaL_checklstring(L, 3, &priv_key.len);
-    
+
     if (n == 4) {
         password.data = (u_char *) luaL_checklstring(L, 4, &password.len);
     }
-    
+
     rc = ngx_http_lua_ssl_certificate(u->conf->ssl, &cert, &priv_key,
                                       &password, r->connection->log);
     if (rc != NGX_OK) {

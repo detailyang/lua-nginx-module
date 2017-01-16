@@ -34,7 +34,7 @@ ngx_http_lua_ssl_init(ngx_log_t *log)
 
 
 int
-ngx_http_lua_ssl_password_callback(char *buf, int size, int rwflag, 
+ngx_http_lua_ssl_password_callback(char *buf, int size, int rwflag,
     void *userdata)
 {
     ngx_str_t *pwd = userdata;
@@ -44,7 +44,7 @@ ngx_http_lua_ssl_password_callback(char *buf, int size, int rwflag,
                       "ngx_ssl_password_callback() is called for encryption");
         return 0;
     }
-    
+
     if (pwd->len == 0) {
         return 0;
     }
@@ -63,7 +63,7 @@ ngx_http_lua_ssl_password_callback(char *buf, int size, int rwflag,
 
 
 ngx_int_t
-ngx_http_lua_ssl_certificate(ngx_ssl_t *ssl, ngx_str_t *cert, 
+ngx_http_lua_ssl_certificate(ngx_ssl_t *ssl, ngx_str_t *cert,
     ngx_str_t *priv_key, ngx_str_t *password, ngx_log_t *log)
 {
     BIO                     *cbio = NULL;
@@ -73,7 +73,7 @@ ngx_http_lua_ssl_certificate(ngx_ssl_t *ssl, ngx_str_t *cert,
     ngx_int_t                rc = NGX_ERROR;
 
     cbio = BIO_new_mem_buf((char *)cert->data, cert->len);
-    if(cbio == NULL) {
+    if (cbio == NULL) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "BIO_new_mem_buf() failed");
         goto done;
     }
@@ -83,20 +83,20 @@ ngx_http_lua_ssl_certificate(ngx_ssl_t *ssl, ngx_str_t *cert,
     */
 
     x509 = PEM_read_bio_X509(cbio, NULL, 0, NULL);
-    if(x509 == NULL) {
+    if (x509 == NULL) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "PEM_read_bio_X509() failed");
         goto done;
     }
 
     if (!SSL_CTX_use_certificate(ssl->ctx, x509)) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "SSL_CTX_use_certificate() failed");
-        goto done; 
+        goto done;
     }
 
     pbio = BIO_new_mem_buf((char *)priv_key->data, priv_key->len);
-    if(pbio == NULL) {
+    if (pbio == NULL) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "BIO_new_mem_buf() failed");
-        goto done; 
+        goto done;
     }
 
     pkey = PEM_read_bio_PrivateKey(pbio, NULL,
@@ -104,30 +104,30 @@ ngx_http_lua_ssl_certificate(ngx_ssl_t *ssl, ngx_str_t *cert,
                                    (void *)password);
     if (pkey == NULL) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "PEM_read_bio_PrivateKey() failed");
-        goto done; 
+        goto done;
     }
 
     if (!SSL_CTX_use_PrivateKey(ssl->ctx, pkey)) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "SSL_CTX_use_PrivateKey() failed");
-        goto done; 
+        goto done;
     }
-    
+
     rc = NGX_OK;
-    
+
 done:
 
     if (pkey) {
         EVP_PKEY_free(pkey);
     }
-    
+
     if (x509) {
         X509_free(x509);
     }
-    
+
     if (pbio) {
         BIO_free(pbio);
     }
-    
+
     if (cbio) {
         BIO_free(cbio);
     }
@@ -135,9 +135,9 @@ done:
     if (rc == NGX_ERROR) {
         ERR_clear_error();
     }
-    
+
     SSL_CTX_set_default_passwd_cb(ssl->ctx, NULL);
-    
+
     return rc;
 }
 
