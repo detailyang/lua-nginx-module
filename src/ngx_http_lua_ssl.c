@@ -44,6 +44,10 @@ ngx_http_lua_ssl_password_callback(char *buf, int size, int rwflag,
                       "ngx_ssl_password_callback() is called for encryption");
         return 0;
     }
+    
+    if (pwd->len == 0) {
+        return 0;
+    }
 
     if (pwd->len > (size_t) size) {
         ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
@@ -95,13 +99,9 @@ ngx_http_lua_ssl_certificate(ngx_ssl_t *ssl, ngx_str_t *cert,
         goto done; 
     }
 
-    if (password->len > 0) {
-        SSL_CTX_set_default_passwd_cb(ssl->ctx,
-                                      ngx_http_lua_ssl_password_callback);
-        SSL_CTX_set_default_passwd_cb_userdata(ssl->ctx, (void *)password);
-    }
-
-    pkey = PEM_read_bio_PrivateKey(pbio, NULL, NULL, NULL);
+    pkey = PEM_read_bio_PrivateKey(pbio, NULL,
+                                   ngx_http_lua_ssl_password_callback,
+                                   (void *)password);
     if (pkey == NULL) {
         ngx_ssl_error(NGX_LOG_ERR, log, 0, "PEM_read_bio_PrivateKey() failed");
         goto done; 
