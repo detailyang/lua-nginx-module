@@ -16,6 +16,7 @@
 #include "ngx_http_lua_output.h"
 #include "ngx_http_lua_contentby.h"
 #include "ngx_http_lua_probe.h"
+#include "ngx_http_lua_ssl.h"
 
 
 static int ngx_http_lua_socket_tcp(lua_State *L);
