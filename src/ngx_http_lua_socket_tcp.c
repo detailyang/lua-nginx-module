@@ -1207,16 +1207,13 @@ ngx_http_lua_socket_conn_error_retval_handler(ngx_http_request_t *r,
 static int
 ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
 {
-    int                      n;
-    char                    *err;
-    BIO                     *bio;
-    X509                    *x509;
-    EVP_PKEY                *pkey;
-    ngx_str_t                cert, priv_key;
-    const char              *password;
-    ngx_connection_t        *c;
-    ngx_http_request_t      *r;
-
+    ngx_str_t                            password = ngx_null_string;
+    
+    int                                  n;
+    ngx_int_t                            rc;
+    ngx_str_t                            cert, priv_key;
+    ngx_connection_t                    *c;
+    ngx_http_request_t                  *r;
     ngx_http_lua_socket_tcp_upstream_t  *u;
 
     /* Lua function arguments: self ,cert ,priv_key [,password] */
@@ -1264,81 +1261,20 @@ ngx_http_lua_socket_tcp_setsslcert(lua_State *L)
 
     cert.data = (u_char *) luaL_checklstring(L, 2, &cert.len);
     priv_key.data = (u_char *) luaL_checklstring(L, 3, &priv_key.len);
-
-    bio = BIO_new_mem_buf((char *)cert.data, cert.len);
-    if(bio == NULL) {
-        err = "BIO_new_mem_buf() failed";
-        ngx_ssl_error(NGX_LOG_ERR, r->connection->log, 0, err);
-        goto failed;
-    }
-
-    /*
-    * Reading the PEM-formatted certificate from memory into an X509
-    */
-
-    x509 = PEM_read_bio_X509(bio, NULL, 0, NULL);
-    if(x509 == NULL) {
-        BIO_free(bio);
-        err = "PEM_read_bio_X509() failed";
-        ngx_ssl_error(NGX_LOG_ERR, r->connection->log, 0, err);
-        goto failed;
-    }
-
-    BIO_free(bio);
-
-    if (!SSL_CTX_use_certificate(u->conf->ssl->ctx, x509)) {
-        X509_free(x509);
-        err = "SSL_CTX_use_certificate() failed";
-        ngx_ssl_error(NGX_LOG_ERR, r->connection->log, 0, err);
-        goto failed;
-    }
-
-    X509_free(x509);
-
-    bio = BIO_new_mem_buf((char *)priv_key.data, priv_key.len);
-    if(bio == NULL) {
-        err = "BIO_new_mem_buf() failed";
-        ngx_ssl_error(NGX_LOG_ERR, r->connection->log, 0, err);
-        goto failed;
-    }
-
+    
     if (n == 4) {
-        password = luaL_checkstring(L, 4);
-        pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, (void *)password);
-
-    } else {
-        pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+        password.data = (u_char *) luaL_checklstring(L, 4, &password.len);
     }
-
-    if (pkey == NULL) {
-        BIO_free(bio);
-        err = "PEM_read_bio_PrivateKey() failed";
-        ngx_ssl_error(NGX_LOG_ERR, r->connection->log, 0, err);
-        goto failed;
+    
+    rc = ngx_http_lua_ssl_certificate(u->conf->ssl, &cert, &key, &password);
+    if (rc != NGX_OK) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "failed to set ssl certificate");
+        return 2;
     }
-
-    BIO_free(bio);
-
-    if (!SSL_CTX_use_PrivateKey(u->conf->ssl->ctx, pkey)) {
-        EVP_PKEY_free(pkey);
-        err = "SSL_CTX_use_PrivateKey() failed";
-        ngx_ssl_error(NGX_LOG_ERR, r->connection->log, 0, err);
-        goto failed;
-    }
-
-    EVP_PKEY_free(pkey);
 
     lua_pushinteger(L, 1);
     return 1;
-
-failed:
-
-    ERR_clear_error();
-
-    lua_pushnil(L);
-    lua_pushstring(L, err);
-
-    return 2;
 }
 
 

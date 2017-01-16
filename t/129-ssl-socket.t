@@ -2872,7 +2872,7 @@ GET /t
 --- response_body eval
 "connected: 1
 ssl handshake: userdata
-sent http request: 54 bytes.
+sent http request: 55 bytes.
 received: HTTP/1.1 200 OK
 received: Server: nginx
 received: Content-Type: text/plain
@@ -2963,7 +2963,7 @@ GET /t
 --- response_body eval
 "connected: 1
 ssl handshake: userdata
-sent http request: 54 bytes.
+sent http request: 55 bytes.
 received: HTTP/1.1 200 OK
 received: Server: nginx
 received: Content-Type: text/plain
@@ -3011,7 +3011,7 @@ close: 1 nil
                 
                 local ok, err = sock:setsslcert(cert, key, "openresty")
                 if not ok then
-                    ngx.say("failed to set ssl certificate: ", err)
+                    ngx.say(err)
                     return 
                 end
             end  -- do
@@ -3022,7 +3022,7 @@ close: 1 nil
 GET /t
 --- response_body
 connected: 1
-failed to set ssl certificate: PEM_read_bio_X509() failed
+failed to set ssl certificate
 
 --- user_files eval: $::certfiles
 --- error_log eval
@@ -3063,7 +3063,7 @@ qr/.*PEM routines:PEM_read_bio:no start line:Expecting: CERTIFICATE.*/
                 
                 local ok, err = sock:setsslcert(cert, key)
                 if not ok then
-                    ngx.say("failed to set ssl certificate: ", err)
+                    ngx.say(err)
                     return 
                 end
             end  -- do
@@ -3074,7 +3074,7 @@ qr/.*PEM routines:PEM_read_bio:no start line:Expecting: CERTIFICATE.*/
 GET /t
 --- response_body
 connected: 1
-failed to set ssl certificate: SSL_CTX_use_PrivateKey() failed
+failed to set ssl certificate
 
 --- user_files eval: $::certfiles
 --- error_log eval
