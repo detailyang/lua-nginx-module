@@ -1872,7 +1872,7 @@ received: Server: nginx
 received: Content-Type: text/plain
 received: Content-Length: 4
 received: Connection: close
-received:
+received: 
 received: foo
 close: 1 nil
 
