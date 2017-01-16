@@ -5,7 +5,7 @@ use Digest::MD5 qw(md5_hex);
 
 repeat_each(2);
 
-plan tests => repeat_each() * 227;
+plan tests => repeat_each() * 233;
 
 $ENV{TEST_NGINX_HTML_DIR} ||= html_dir();
 
@@ -2748,6 +2748,7 @@ failed to set ssl certificate: closed
 
 
 === TEST 35: setsslcert should return error on sslhandshaked connection
+--- http_config eval: $::sslhttpconfig
 --- config
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
