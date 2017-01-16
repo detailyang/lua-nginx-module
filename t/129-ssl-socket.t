@@ -5,7 +5,7 @@ use Digest::MD5 qw(md5_hex);
 
 repeat_each(2);
 
-plan tests => repeat_each() * 224;
+plan tests => repeat_each() * 234;
 
 $ENV{TEST_NGINX_HTML_DIR} ||= html_dir();
 
@@ -51,7 +51,7 @@ server {
     ssl_verify_client on;
 
     server_tokens off;
-    
+
     location / {
         default_type 'text/plain';
         content_by_lua_block {
@@ -59,7 +59,7 @@ server {
         }
         more_clear_headers Date;
     }
-    
+
     location /cert {
         default_type 'text/plain';
         content_by_lua_block {
@@ -1767,7 +1767,7 @@ received: Server: nginx
 received: Content-Type: text/plain
 received: Content-Length: 4
 received: Connection: close
-received: 
+received:
 received: foo
 close: 1 nil
 
@@ -1872,7 +1872,7 @@ received: Server: nginx
 received: Content-Type: text/plain
 received: Content-Length: 4
 received: Connection: close
-received: 
+received:
 received: foo
 close: 1 nil
 
@@ -2527,7 +2527,7 @@ received: Server: nginx
 received: Content-Type: text/plain
 received: Content-Length: 4
 received: Connection: close
-received: 
+received:
 received: foo
 close: 1 nil
 
@@ -2723,17 +2723,17 @@ qr/\[error\] .* ngx.socket setsslcert: expecting 1 ~ 4 arguments \(including the
                 f:close()
                 return content
             end
-            
+
             local sock = ngx.socket.tcp()
             sock:settimeout(3000)
-                
+
             local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
             local key = read_file("$TEST_NGINX_HTML_DIR/client.unsecure.key")
-            
+
             local ok, err = sock:setsslcert(cert, key)
             if not ok then
                 ngx.say("failed to set ssl certificate: ", err)
-                return 
+                return
             end
         }
     }
@@ -2762,7 +2762,7 @@ failed to set ssl certificate: closed
                 f:close()
                 return content
             end
-            
+
             local sock = ngx.socket.tcp()
             sock:settimeout(3000)
             local ok, err = sock:connect("127.0.0.1", 1983)
@@ -2770,20 +2770,20 @@ failed to set ssl certificate: closed
                 ngx.say("failed to connect: ", err)
                 return
             end
-            
+
             local sess, err = sock:sslhandshake(nil, nil, true)
             if not sess then
                 ngx.say("failed to do SSL handshake: ", err)
                 return
             end
-                
+
             local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
             local key = read_file("$TEST_NGINX_HTML_DIR/client.unsecure.key")
-            
+
             local ok, err = sock:setsslcert(cert, key)
             if not ok then
                 ngx.say("failed to set ssl certificate: ", err)
-                return 
+                return
             end
         }
     }
@@ -2813,7 +2813,7 @@ failed to set ssl certificate: sslhandshaked
                 f:close()
                 return content
             end
-            
+
             do
                 local sock = ngx.socket.tcp()
                 sock:settimeout(3000)
@@ -2824,14 +2824,14 @@ failed to set ssl certificate: sslhandshaked
                 end
 
                 ngx.say("connected: ", ok)
-                
+
                 local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
                 local key = read_file("$TEST_NGINX_HTML_DIR/client.unsecure.key")
-                
+
                 local ok, err = sock:setsslcert(cert, key)
                 if not ok then
                     ngx.say("failed to set ssl certificate: ", err)
-                    return 
+                    return
                 end
 
                 local sess, err = sock:sslhandshake(nil, nil, true)
@@ -2879,7 +2879,7 @@ received: Server: nginx
 received: Content-Type: text/plain
 received: Content-Length: 33
 received: Connection: close
-received: 
+received:
 received: $::clientCrtMd5
 close: 1 nil
 "
@@ -2904,7 +2904,7 @@ close: 1 nil
                 f:close()
                 return content
             end
-            
+
             do
                 local sock = ngx.socket.tcp()
                 sock:settimeout(3000)
@@ -2915,14 +2915,14 @@ close: 1 nil
                 end
 
                 ngx.say("connected: ", ok)
-                
+
                 local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
                 local key = read_file("$TEST_NGINX_HTML_DIR/client.key")
-                
+
                 local ok, err = sock:setsslcert(cert, key, "openresty")
                 if not ok then
                     ngx.say("failed to set ssl certificate: ", err)
-                    return 
+                    return
                 end
 
                 local sess, err = sock:sslhandshake(nil, nil, true)
@@ -2970,7 +2970,7 @@ received: Server: nginx
 received: Content-Type: text/plain
 received: Content-Length: 33
 received: Connection: close
-received: 
+received:
 received: $::clientCrtMd5
 close: 1 nil
 "
@@ -2995,7 +2995,7 @@ close: 1 nil
                 f:close()
                 return content
             end
-            
+
             do
                 local sock = ngx.socket.tcp()
                 sock:settimeout(3000)
@@ -3006,14 +3006,14 @@ close: 1 nil
                 end
 
                 ngx.say("connected: ", ok)
-                
+
                 local cert = read_file("$TEST_NGINX_HTML_DIR/wrong.crt")
                 local key = read_file("$TEST_NGINX_HTML_DIR/client.key")
-                
+
                 local ok, err = sock:setsslcert(cert, key, "openresty")
                 if not ok then
                     ngx.say(err)
-                    return 
+                    return
                 end
             end  -- do
         }
@@ -3032,7 +3032,7 @@ qr/.*PEM routines:PEM_read_bio:no start line:Expecting: CERTIFICATE.*/
 
 
 
-=== TEST 39: setsslcert set ssl unmatched private key 
+=== TEST 39: setsslcert set ssl unmatched private key
 --- http_config eval: $::sslhttpconfig
 --- config
     server_tokens off;
@@ -3047,7 +3047,7 @@ qr/.*PEM routines:PEM_read_bio:no start line:Expecting: CERTIFICATE.*/
                 f:close()
                 return content
             end
-            
+
             do
                 local sock = ngx.socket.tcp()
                 sock:settimeout(3000)
@@ -3058,14 +3058,14 @@ qr/.*PEM routines:PEM_read_bio:no start line:Expecting: CERTIFICATE.*/
                 end
 
                 ngx.say("connected: ", ok)
-                
+
                 local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
                 local key = read_file("$TEST_NGINX_HTML_DIR/server.unsecure.key")
-                
+
                 local ok, err = sock:setsslcert(cert, key)
                 if not ok then
                     ngx.say(err)
-                    return 
+                    return
                 end
             end  -- do
         }
