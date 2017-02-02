@@ -983,8 +983,8 @@ ngx_http_lua_ffi_priv_key_pem_to_der(const u_char *pem, size_t pem_len,
 
 
 int
-ngx_http_lua_ffi_priv_key_pem_to_der_with_password(const u_char *pem, size_t pem_len,
-    const u_char *pwd, size_t pwd_len, u_char *der, char **err)
+ngx_http_lua_ffi_priv_key_pem_to_der_with_password(const u_char *pem,
+    size_t pem_len, const u_char *pwd, size_t pwd_len, u_char *der, char **err)
 {
     int          len;
     BIO         *in;
@@ -1148,8 +1148,8 @@ ngx_http_lua_ffi_parse_pem_priv_key(const u_char *pem, size_t pem_len,
 
 
 void *
-ngx_http_lua_ffi_parse_pem_priv_key_with_password(const u_char *pem, size_t pem_len,
-    const u_char *pwd, size_t pwd_len, char **err)
+ngx_http_lua_ffi_parse_pem_priv_key_with_password(const u_char *pem,
+    size_t pem_len, const u_char *pwd, size_t pwd_len, char **err)
 {
     BIO         *in;
     EVP_PKEY    *pkey;
