@@ -196,7 +196,8 @@ ngx_http_lua_ssl_ctx_init(lua_State *L)
             break;
 
         case LUA_TSTRING:
-            key_password.data = (u_char *) lua_tolstring(L, -1, &key_password.len);
+            key_password.data = (u_char *) lua_tolstring(L, -1,
+                                                         &key_password.len);
             break;
 
         default:
