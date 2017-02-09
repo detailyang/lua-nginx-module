@@ -72,7 +72,7 @@ ngx_http_lua_inject_ssl_api(lua_State *L)
     lua_pushcfunction(L, ngx_http_lua_ssl_ctx);
     lua_setfield(L, -2, "ctx");
 
-    /* {{{ssl ctx obj metatable */
+    /* {{{ssl ctx table metatable */
     lua_pushlightuserdata(L, &ngx_http_lua_ssl_ctx_metatable_key);
     lua_createtable(L, 0 /* narr */, 2 /* nrec */); /* metatable */
 
