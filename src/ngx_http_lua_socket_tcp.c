@@ -5,12 +5,13 @@
 
 
 #ifndef DDEBUG
-#define DDEBUG 0
+#define DDEBUG 1
 #endif
 #include "ddebug.h"
 
 
 #include "ngx_http_lua_socket_tcp.h"
+#include "ngx_http_lua_ssl.h"
 #include "ngx_http_lua_util.h"
 #include "ngx_http_lua_uthread.h"
 #include "ngx_http_lua_output.h"
@@ -21,6 +22,7 @@
 static int ngx_http_lua_socket_tcp(lua_State *L);
 static int ngx_http_lua_socket_tcp_connect(lua_State *L);
 #if (NGX_HTTP_SSL)
+static int ngx_http_lua_socket_tcp_setsslctx(lua_State *L);
 static int ngx_http_lua_socket_tcp_sslhandshake(lua_State *L);
 #endif
 static int ngx_http_lua_socket_tcp_receive(lua_State *L);
@@ -142,6 +144,7 @@ enum {
     SOCKET_CONNECT_TIMEOUT_INDEX = 2,
     SOCKET_SEND_TIMEOUT_INDEX = 4,
     SOCKET_READ_TIMEOUT_INDEX = 5,
+    SOCKET_SSL_CTX_INDEX = 6
 };
 
 
@@ -275,12 +278,15 @@ ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
 
     /* {{{tcp object metatable */
     lua_pushlightuserdata(L, &ngx_http_lua_tcp_socket_metatable_key);
-    lua_createtable(L, 0 /* narr */, 12 /* nrec */);
+    lua_createtable(L, 0 /* narr */, 13 /* nrec */);
 
     lua_pushcfunction(L, ngx_http_lua_socket_tcp_connect);
     lua_setfield(L, -2, "connect");
 
 #if (NGX_HTTP_SSL)
+
+    lua_pushcfunction(L, ngx_http_lua_socket_tcp_setsslctx);
+    lua_setfield(L, -2, "setsslctx");
 
     lua_pushcfunction(L, ngx_http_lua_socket_tcp_sslhandshake);
     lua_setfield(L, -2, "sslhandshake");
@@ -401,7 +407,7 @@ ngx_http_lua_socket_tcp(lua_State *L)
                                | NGX_HTTP_LUA_CONTEXT_SSL_CERT
                                | NGX_HTTP_LUA_CONTEXT_SSL_SESS_FETCH);
 
-    lua_createtable(L, 5 /* narr */, 1 /* nrec */);
+    lua_createtable(L, 6 /* narr */, 1 /* nrec */);
     lua_pushlightuserdata(L, &ngx_http_lua_tcp_socket_metatable_key);
     lua_rawget(L, LUA_REGISTRYINDEX);
     lua_setmetatable(L, -2);
@@ -1201,11 +1207,49 @@ ngx_http_lua_socket_conn_error_retval_handler(ngx_http_request_t *r,
 #if (NGX_HTTP_SSL)
 
 static int
+ngx_http_lua_socket_tcp_setsslctx(lua_State *L)
+{
+    int           n;
+    SSL_CTX     **pssl_ctx;
+
+    n = lua_gettop(L);
+    if (n != 2) {
+        return luaL_error(L, "ngx.socket sslsetctx: expecting 2 "
+                          "arguments (including the object), but seen %d", n);
+    }
+
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    /* check out the ssl ctx table */
+    luaL_checktype(L, 2, LUA_TTABLE);
+
+    lua_rawgeti(L, 2, SSL_CTX_INDEX);
+    lua_pushvalue(L, 3);
+
+    pssl_ctx = lua_touserdata(L, -1);
+    if (pssl_ctx == NULL || *pssl_ctx == NULL) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "no ssl ctx found");
+
+        return 2;
+    }
+
+    lua_rawseti(L, 1, SOCKET_SSL_CTX_INDEX);
+
+    lua_pushinteger(L, 1);
+
+    return 1;
+}
+
+
+static int
 ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
 {
     int                      n, top;
+    SSL_CTX                **pssl_ctx;
     ngx_int_t                rc;
     ngx_str_t                name = ngx_null_string;
+    ngx_ssl_t                ssl;
     ngx_connection_t        *c;
     ngx_ssl_session_t      **psession;
     ngx_http_request_t      *r;
@@ -1286,7 +1330,21 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
         return 1;
     }
 
-    if (ngx_ssl_create_connection(u->conf->ssl, c,
+    /* inherit u->conf->ssl */
+    ssl.log = u->conf->ssl->log;
+    ssl.buffer_size = u->conf->ssl->buffer_size;
+    ssl.ctx = u->conf->ssl->ctx;
+
+    lua_rawgeti(L, 1, SOCKET_SSL_CTX_INDEX);
+
+    pssl_ctx = lua_touserdata(L, -1);
+    if (pssl_ctx != NULL && *pssl_ctx != NULL) {
+        ssl.ctx = *pssl_ctx;
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
+                       "lua ssl use ctx: %p cert:%p", *pssl_ctx);
+    }
+
+    if (ngx_ssl_create_connection(&ssl, c,
                                   NGX_SSL_BUFFER|NGX_SSL_CLIENT)
         != NGX_OK)
     {
