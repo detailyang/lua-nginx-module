@@ -34,7 +34,7 @@ __DATA__
 --- request
 GET /test
 --- response_body
-ngx: 116
+ngx: 117
 --- no_error_log
 [error]
 

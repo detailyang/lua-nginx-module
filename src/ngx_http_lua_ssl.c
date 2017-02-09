@@ -608,9 +608,9 @@ ngx_http_lua_ssl_ctx_use_certificate(SSL_CTX *ctx, ngx_str_t *cert,
 
 #else
 
-        if (SSL_CTX_add_extra_chain_cert(ssl->ctx, x509) == 0) {
+        if (SSL_CTX_add_extra_chain_cert(ctx, x509) == 0) {
             *err = "SSL_CTX_add_extra_chain_cert() failed";
-            ngx_ssl_error(NGX_LOG_EMERG, ssl->log, 0, (char *) *err);
+            ngx_ssl_error(NGX_LOG_EMERG, log, 0, (char *) *err);
             X509_free(x509);
             BIO_free(bio);
             return NGX_ERROR;
