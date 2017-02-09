@@ -5,7 +5,7 @@
 
 
 #ifndef DDEBUG
-#define DDEBUG 1
+#define DDEBUG 0
 #endif
 #include "ddebug.h"
 
@@ -72,7 +72,7 @@ ngx_http_lua_inject_ssl_api(lua_State *L)
     lua_pushcfunction(L, ngx_http_lua_ssl_ctx);
     lua_setfield(L, -2, "ctx");
 
-    /* {{{ssl ctx table metatable */
+    /* {{{ssl ctx object metatable */
     lua_pushlightuserdata(L, &ngx_http_lua_ssl_ctx_metatable_key);
     lua_createtable(L, 0 /* narr */, 2 /* nrec */); /* metatable */
 
@@ -101,9 +101,11 @@ ngx_http_lua_inject_ssl_api(lua_State *L)
 static int
 ngx_http_lua_ssl_ctx(lua_State *L)
 {
-    if (lua_gettop(L) != 0) {
-        return luaL_error(L, "expecting zero arguments, but got %d",
-                          lua_gettop(L));
+    int     n;
+
+    n = lua_gettop(L);
+    if (n != 0) {
+        return luaL_error(L, "expecting zero arguments, but got %d", n);
     }
 
     lua_createtable(L, 1 /* narr */, 1 /* nrec */);
@@ -112,7 +114,7 @@ ngx_http_lua_ssl_ctx(lua_State *L)
     lua_rawget(L, LUA_REGISTRYINDEX);
     lua_setmetatable(L, -2);
 
-    dd("top: %d", lua_gettop(L));
+    dd("top: %d", n);
 
     return 1;
 }
@@ -224,6 +226,8 @@ ngx_http_lua_ssl_ctx_init(lua_State *L)
         return 2;
     }
 
+    ngx_http_lua_ssl_ctx_set_default_options(ssl_ctx);
+
     ud = lua_newuserdata(L, sizeof(SSL_CTX *));
     *ud = ssl_ctx;
 
@@ -232,8 +236,6 @@ ngx_http_lua_ssl_ctx_init(lua_State *L)
     lua_rawget(L, LUA_REGISTRYINDEX);
     lua_setmetatable(L, -2);
     lua_rawseti(L, 1, SSL_CTX_INDEX);
-
-    ngx_http_lua_ssl_ctx_set_default_options(ssl_ctx);
 
     if (cert.len > 0) {
         if (ngx_http_lua_ssl_ctx_use_certificate(ssl_ctx,

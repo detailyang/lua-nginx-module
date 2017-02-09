@@ -5,7 +5,7 @@
 
 
 #ifndef DDEBUG
-#define DDEBUG 1
+#define DDEBUG 0
 #endif
 #include "ddebug.h"
 
@@ -1214,7 +1214,7 @@ ngx_http_lua_socket_tcp_setsslctx(lua_State *L)
 
     n = lua_gettop(L);
     if (n != 2) {
-        return luaL_error(L, "ngx.socket sslsetctx: expecting 2 "
+        return luaL_error(L, "ngx.socket setsslctx: expecting 2 "
                           "arguments (including the object), but seen %d", n);
     }
 
@@ -1341,7 +1341,7 @@ ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
     if (pssl_ctx != NULL && *pssl_ctx != NULL) {
         ssl.ctx = *pssl_ctx;
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                       "lua ssl use ctx: %p cert:%p", *pssl_ctx);
+                       "lua tcp use ssl ctx: %p ", *pssl_ctx);
     }
 
     if (ngx_ssl_create_connection(&ssl, c,
