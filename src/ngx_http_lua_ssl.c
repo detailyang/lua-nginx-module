@@ -277,12 +277,12 @@ ngx_http_lua_ssl_ctx_userdata_free(lua_State *L)
     pssl_ctx = lua_touserdata(L, 1);
     if (pssl_ctx == NULL || *pssl_ctx == NULL) {
         ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-          "ssl ctx has been freed");
+                      "ssl ctx has been freed");
         return 0;
     }
 
     ngx_log_error(NGX_LOG_DEBUG, ngx_cycle->log, 0,
-          "free ssl ctx: %p:%d", *pssl_ctx, (*pssl_ctx)->references);
+                  "free ssl ctx: %p:%d", *pssl_ctx, (*pssl_ctx)->references);
 
     /* SSL_CTX_free will free the following data
      * lh_SSL_SESSION_free(ctx->sessions);
