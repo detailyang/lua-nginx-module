@@ -27,6 +27,8 @@ static int ngx_http_lua_ssl_ctx_use_private_key(SSL_CTX *ctx,
     ngx_str_t *priv_key, ngx_str_t *password, const char **err, ngx_log_t *log);
 static int ngx_http_lua_ssl_ctx_userdata_free(lua_State *L);
 static void ngx_http_lua_ssl_ctx_set_default_options(SSL_CTX *ctx);
+static ngx_int_t ngx_http_lua_ssl_ctx_add_cacert(SSL_CTX *ctx,
+    ngx_str_t *cacert, const char **err, ngx_log_t *log);
 static int ngx_http_lua_ssl_password_callback(char *buf, int size, int rwflag,
     void *userdata);
 static void ngx_http_lua_ssl_info_callback(const ngx_ssl_conn_t *ssl_conn,
@@ -123,9 +125,10 @@ ngx_http_lua_ssl_ctx(lua_State *L)
 static int
 ngx_http_lua_ssl_ctx_init(lua_State *L)
 {
-    ngx_str_t                key_password = ngx_null_string;
     ngx_str_t                cert = ngx_null_string;
     ngx_str_t                priv_key = ngx_null_string;
+    ngx_str_t                key_password = ngx_null_string;
+    ngx_str_t                cacert = ngx_null_string;
     ngx_str_t                method = ngx_string("SSLv23_method");
 
     int                      n;
@@ -206,7 +209,23 @@ ngx_http_lua_ssl_ctx_init(lua_State *L)
 
     }
 
-    lua_pop(L, 4);
+    lua_getfield(L, -5, "cacert");
+
+    switch (lua_type(L, -1)) {
+        case LUA_TNIL:
+            break;
+
+        case LUA_TSTRING:
+            cacert.data = (u_char *) lua_tolstring(L, -1,
+                                                         &cacert.len);
+            break;
+
+        default:
+            return luaL_error(L, "bad \"cacert\" option value type: %s",
+                              luaL_typename(L, -1));
+    }
+
+    lua_pop(L, 5);
 
     if (ngx_http_lua_ssl_ctx_create_method(&ssl_method,
                                        &method,
@@ -256,6 +275,20 @@ ngx_http_lua_ssl_ctx_init(lua_State *L)
                                                  &key_password,
                                                  &err,
                                                  ngx_cycle->log) != NGX_OK)
+        {
+            lua_pushnil(L);
+            lua_pushstring(L, err);
+            return 2;
+        }
+    }
+
+    /* TODO: add default root ca cert */
+
+    if (cacert.len > 0) {
+        if (ngx_http_lua_ssl_ctx_add_cacert(ssl_ctx,
+                                            &cacert,
+                                            &err,
+                                            ngx_cycle->log) != NGX_OK)
         {
             lua_pushnil(L);
             lua_pushstring(L, err);
@@ -553,14 +586,14 @@ ngx_http_lua_ssl_ctx_use_certificate(SSL_CTX *ctx, ngx_str_t *cert,
     x509 = PEM_read_bio_X509_AUX(bio, NULL, NULL, NULL);
     if (x509 == NULL) {
         *err = "PEM_read_bio_X509_AUX failed";
-        ngx_ssl_error(NGX_LOG_EMERG, log, 0, (char *) *err);
+        ngx_ssl_error(NGX_LOG_ERR, log, 0, (char *) *err);
         BIO_free(bio);
         return NGX_ERROR;
     }
 
     if (SSL_CTX_use_certificate(ctx, x509) == 0) {
         *err = "SSL_CTX_use_certificate() failed";
-        ngx_ssl_error(NGX_LOG_EMERG, log, 0, (char *) *err);
+        ngx_ssl_error(NGX_LOG_ERR, log, 0, (char *) *err);
         X509_free(x509);
         BIO_free(bio);
         return NGX_ERROR;
@@ -585,7 +618,7 @@ ngx_http_lua_ssl_ctx_use_certificate(SSL_CTX *ctx, ngx_str_t *cert,
             /* some real error */
 
             *err = "PEM_read_bio_X509() failed";
-            ngx_ssl_error(NGX_LOG_EMERG, log, 0, (char *) *err);
+            ngx_ssl_error(NGX_LOG_ERR, log, 0, (char *) *err);
             BIO_free(bio);
             return NGX_ERROR;
         }
@@ -600,7 +633,7 @@ ngx_http_lua_ssl_ctx_use_certificate(SSL_CTX *ctx, ngx_str_t *cert,
 
         if (SSL_CTX_add0_chain_cert(ctx, x509) == 0) {
             *err = "SSL_CTX_add0_chain_cert() failed";
-            ngx_ssl_error(NGX_LOG_EMERG, log, 0, (char *) *err);
+            ngx_ssl_error(NGX_LOG_ERR, log, 0, (char *) *err);
             X509_free(x509);
             BIO_free(bio);
             return NGX_ERROR;
@@ -610,7 +643,7 @@ ngx_http_lua_ssl_ctx_use_certificate(SSL_CTX *ctx, ngx_str_t *cert,
 
         if (SSL_CTX_add_extra_chain_cert(ctx, x509) == 0) {
             *err = "SSL_CTX_add_extra_chain_cert() failed";
-            ngx_ssl_error(NGX_LOG_EMERG, log, 0, (char *) *err);
+            ngx_ssl_error(NGX_LOG_ERR, log, 0, (char *) *err);
             X509_free(x509);
             BIO_free(bio);
             return NGX_ERROR;
@@ -659,6 +692,71 @@ ngx_http_lua_ssl_ctx_use_private_key(SSL_CTX *ctx, ngx_str_t *priv_key,
     }
 
     EVP_PKEY_free(pkey);
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_lua_ssl_ctx_add_cacert(SSL_CTX *ctx, ngx_str_t *cacert,
+    const char **err, ngx_log_t *log)
+{
+    BIO         *bio;
+    X509        *x509;
+    u_long       n;
+    X509_STORE  *cert_store;
+
+    bio = BIO_new_mem_buf((char *) cacert->data, cacert->len);
+    if (bio == NULL) {
+        *err = "BIO_new_mem_buf() failed";
+        ngx_ssl_error(NGX_LOG_ERR, log, 0, (char *) *err);
+        return NGX_ERROR;
+    }
+
+    cert_store = SSL_CTX_get_cert_store(ctx);
+
+    for ( ;; ) {
+
+        x509 = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+        if (x509 == NULL) {
+            n = ERR_peek_last_error();
+
+            if (ERR_GET_LIB(n) == ERR_LIB_PEM
+                && ERR_GET_REASON(n) == PEM_R_NO_START_LINE)
+            {
+                /* end of file */
+                ERR_clear_error();
+                break;
+            }
+
+            /* some real error */
+
+            *err = "PEM_read_bio_X509() failed";
+            ngx_ssl_error(NGX_LOG_ERR, log, 0,
+                          "PEM_read_bio_X509(\"%s\") failed", cacert->data);
+
+            BIO_free(bio);
+            return NGX_ERROR;
+        }
+
+        if (X509_STORE_add_cert(cert_store, x509) == 0) {
+            X509_free(x509);
+            *err = "X509_STORE_add_cert() failed";
+            ngx_ssl_error(NGX_LOG_ERR, log, 0, (char *) *err);
+            return NGX_ERROR;
+        }
+
+        if (SSL_CTX_add_client_CA(ctx, x509) == 0) {
+            X509_free(x509);
+            *err = "SSL_CTX_add_client_CA() failed";
+            ngx_ssl_error(NGX_LOG_ERR, log, 0, (char *) *err);
+            return NGX_ERROR;
+        }
+
+        X509_free(x509);
+    }
+
+    BIO_free(bio);
 
     return NGX_OK;
 }
