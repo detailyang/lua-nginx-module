@@ -5,7 +5,7 @@ use Digest::MD5 qw(md5_hex);
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() + 5);
+plan tests => repeat_each() * (blocks() + 3);
 
 $ENV{TEST_NGINX_HTML_DIR} ||= html_dir();
 
