@@ -57,7 +57,7 @@ init_by_lua_block {
             end
         end
 
-        return nil, "not found CRLF"
+        return nil, "CRLF not found"
     end
 
     function https_get(host, port, path, ssl_ctx)
@@ -85,8 +85,11 @@ init_by_lua_block {
 
         local response = {}
         while true do
-            local line, err = sock:receive()
+            local line, err, partial = sock:receive()
             if not line then
+                if not partial then
+                    response[#response+1] = partial
+                end
                 break
             end
 

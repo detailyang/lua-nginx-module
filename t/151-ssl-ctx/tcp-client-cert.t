@@ -49,6 +49,58 @@ init_by_lua_block {
         f:close()
         return content
     end
+
+
+    function get_response_body(response)
+        for k, v in ipairs(response) do
+            if #v == 0 then
+                return table.concat(response, "\\r\\n", k + 1, #response - 1)
+            end
+        end
+
+        return nil, "CRLF not found"
+    end
+
+    function https_get(host, port, path, ssl_ctx)
+        local sock = ngx.socket.tcp()
+        local ok, err = sock:setsslctx(ssl_ctx)
+        if not ok then
+            return nil, err
+        end
+
+        local ok, err = sock:connect(host, port)
+        if not ok then
+            return nil, err
+        end
+
+        local sess, err = sock:sslhandshake()
+        if not sess then
+            return nil, err
+        end
+
+        local req = "GET " .. path .. " HTTP/1.0\\r\\nHost: server\\r\\nConnection: close\\r\\n\\r\\n"
+        local bytes, err = sock:send(req)
+        if not bytes then
+            return nil, err
+        end
+
+        local response = {}
+        while true do
+            local line, err, partial = sock:receive()
+            if not line then
+                if partial then
+                    response[#response+1] = partial
+                end
+                break
+            end
+
+            response[#response+1] = line
+        end
+
+        sock:close()
+
+        return response
+    end
 }
 server {
     listen 1983 ssl;
@@ -122,7 +174,7 @@ qr/\[error\] .* ngx.socket setsslctx: expecting 2 arguments \(including the obje
 
 
 
-=== TEST 2: setsslctx - expecting the two arguments
+=== TEST 2: setsslctx - no ssl ctx found
 --- config
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     location /t {
@@ -171,50 +223,8 @@ GET /t
                     return
                 end
 
-                local sock = ngx.socket.tcp()
-                sock:settimeout(3000)
-                local ok, err = sock:setsslctx(ssl_ctx)
-                if not ok then
-                    ngx.say("faile to set tcp ssl ctx: ")
-                end
-
-                local ok, err = sock:connect("127.0.0.1", 1983)
-                if not ok then
-                    ngx.say("failed to connect: ", err)
-                    return
-                end
-
-                ngx.say("connected: ", ok)
-
-                local sess, err = sock:sslhandshake(nil, nil, true)
-                if not sess then
-                    ngx.say("failed to do SSL handshake: ", err)
-                    return
-                end
-
-                ngx.say("ssl handshake: ", type(sess))
-
-                local req = "GET /cert HTTP/1.0\r\nHost: server\r\nConnection: close\r\n\r\n"
-                local bytes, err = sock:send(req)
-                if not bytes then
-                    ngx.say("failed to send http request: ", err)
-                    return
-                end
-
-                ngx.say("sent http request: ", bytes, " bytes.")
-
-                while true do
-                    local line, err = sock:receive()
-                    if not line then
-                        -- ngx.say("failed to receive response status line: ", err)
-                        break
-                    end
-
-                    ngx.say("received: ", line)
-                end
-
-                local ok, err = sock:close()
-                ngx.say("close: ", ok, " ", err)
+                response = https_get("127.0.0.1", 1983, "/cert", ssl_ctx)
+                ngx.say(get_response_body(response))
             end  -- do
             collectgarbage()
         }
@@ -224,20 +234,7 @@ GET /t
 GET /t
 
 --- response_body eval
-"connected: 1
-ssl handshake: userdata
-sent http request: 55 bytes.
-received: HTTP/1.1 200 OK
-received: Server: nginx
-received: Content-Type: text/plain
-received: Content-Length: 33
-received: Connection: close
-received: 
-received: $::clientCrtMd5
-close: 1 nil
+"$::clientCrtMd5
 "
 
 --- user_files eval: $::certfiles
---- timeout: 5
-
-
