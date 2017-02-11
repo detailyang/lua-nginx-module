@@ -5,7 +5,7 @@ use Digest::MD5 qw(md5_hex);
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() + 2);
+plan tests => repeat_each() * (blocks() + 5);
 
 $ENV{TEST_NGINX_HTML_DIR} ||= html_dir();
 
@@ -170,7 +170,6 @@ GET /t
 --- ignore_response
 --- error_log eval
 qr/\[error\] .* ngx.socket setsslctx: expecting 2 arguments \(including the object\), but seen 1/
---- timeout: 5
 
 
 
@@ -207,26 +206,63 @@ GET /t
 
     location /t {
         content_by_lua_block {
-            do
-                local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
-                local key = read_file("$TEST_NGINX_HTML_DIR/client.unsecure.key")
-                local cacert = read_file("$TEST_NGINX_HTML_DIR/ca.crt")
+            local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
+            local key = read_file("$TEST_NGINX_HTML_DIR/client.unsecure.key")
+            local cacert = read_file("$TEST_NGINX_HTML_DIR/ca.crt")
 
-                local ssl_ctx = ngx.ssl.ctx()
-                local ok, err = ssl_ctx:init({
-                    key = key,
-                    cert = cert,
-                    cacert = cacert
-                })
-                if not ok then
-                    ngx.say("failed to init ssl ctx: ", err)
-                    return
-                end
+            local ssl_ctx = ngx.ssl.ctx()
+            local ok, err = ssl_ctx:init({
+                key = key,
+                cert = cert,
+                cacert = cacert
+            })
+            if not ok then
+                ngx.say("failed to init ssl ctx: ", err)
+                return
+            end
 
-                response = https_get("127.0.0.1", 1983, "/cert", ssl_ctx)
-                ngx.say(get_response_body(response))
-            end  -- do
-            collectgarbage()
+            response = https_get("127.0.0.1", 1983, "/cert", ssl_ctx)
+            ngx.say(get_response_body(response))
+        }
+    }
+
+--- request
+GET /t
+
+--- response_body eval
+"$::clientCrtMd5
+"
+
+--- user_files eval: $::certfiles
+
+
+
+=== TEST 4: setsslctx - send client certificate with password private key
+--- http_config eval: $::sslhttpconfig
+--- config
+    server_tokens off;
+    resolver $TEST_NGINX_RESOLVER ipv6=off;
+
+    location /t {
+        content_by_lua_block {
+            local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
+            local key = read_file("$TEST_NGINX_HTML_DIR/client.key")
+            local cacert = read_file("$TEST_NGINX_HTML_DIR/ca.crt")
+
+            local ssl_ctx = ngx.ssl.ctx()
+            local ok, err = ssl_ctx:init({
+                key = key,
+                key_password = "openresty",
+                cert = cert,
+                cacert = cacert
+            })
+            if not ok then
+                ngx.say("failed to init ssl ctx: ", err)
+                return
+            end
+
+            response = https_get("127.0.0.1", 1983, "/cert", ssl_ctx)
+            ngx.say(get_response_body(response))
         }
     }
 

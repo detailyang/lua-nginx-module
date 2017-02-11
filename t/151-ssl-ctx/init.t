@@ -5,7 +5,7 @@ use Digest::MD5 qw(md5_hex);
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() + 12);
+plan tests => repeat_each() * (blocks() + 14);
 
 $ENV{TEST_NGINX_HTML_DIR} ||= html_dir();
 
@@ -158,9 +158,6 @@ __DATA__
 === TEST 1: sslctx:init wrong formated certificate
 --- http_config eval: $::sslhttpconfig
 --- config
-    server_tokens off;
-    resolver $TEST_NGINX_RESOLVER ipv6=off;
-
     location /t {
         content_by_lua_block {
             local cert = read_file("$TEST_NGINX_HTML_DIR/wrong.crt")
@@ -179,16 +176,12 @@ GET /t
 --- user_files eval: $::certfiles
 --- error_log eval
 qr/.*PEM routines:PEM_read_bio:no start line:Expecting: TRUSTED CERTIFICATE.*/
---- timeout: 5
 
 
 
 === TEST 2: sslctx:init wrong formated key
 --- http_config eval: $::sslhttpconfig
 --- config
-    server_tokens off;
-    resolver $TEST_NGINX_RESOLVER ipv6=off;
-
     location /t {
         content_by_lua_block {
             local key = read_file("$TEST_NGINX_HTML_DIR/wrong.key")
@@ -207,16 +200,12 @@ GET /t
 --- user_files eval: $::certfiles
 --- error_log eval
 qr/.*PEM routines:PEM_read_bio:no start line:Expecting: ANY PRIVATE KEY.*/
---- timeout: 5
 
 
 
 === TEST 3: sslctx:init with wrong password key
 --- http_config eval: $::sslhttpconfig
 --- config
-    server_tokens off;
-    resolver $TEST_NGINX_RESOLVER ipv6=off;
-
     location /t {
         content_by_lua_block {
             local key = read_file("$TEST_NGINX_HTML_DIR/client.key")
@@ -328,16 +317,12 @@ GET /t
 --- user_files eval: $::certfiles
 --- no_error_log
 [error]
---- timeout: 5
 
 
 
 === TEST 6: sslctx:init specify ssl protocols method TLSv1.1
 --- http_config eval: $::sslhttpconfig
 --- config
-    server_tokens off;
-    resolver $TEST_NGINX_RESOLVER ipv6=off;
-
     location /t {
         content_by_lua_block {
             local key = read_file("$TEST_NGINX_HTML_DIR/client.key")
@@ -383,9 +368,6 @@ GET /t
 === TEST 7: sslctx:init specify ssl protocols method TLSv1.2
 --- http_config eval: $::sslhttpconfig
 --- config
-    server_tokens off;
-    resolver $TEST_NGINX_RESOLVER ipv6=off;
-
     location /t {
         content_by_lua_block {
             local key = read_file("$TEST_NGINX_HTML_DIR/client.key")
@@ -458,3 +440,38 @@ GET /t
 --- user_files eval: $::certfiles
 --- no_error_log
 [error]
+
+
+
+=== TEST 9: sslctx:init - init ssl unmatched key cert pair
+--- http_config eval: $::sslhttpconfig
+--- config
+    location /t {
+        content_by_lua_block {
+            local servercert = read_file("$TEST_NGINX_HTML_DIR/server.crt")
+            local cert = read_file("$TEST_NGINX_HTML_DIR/client.crt")
+            local key = read_file("$TEST_NGINX_HTML_DIR/client.key")
+            local cacert = read_file("$TEST_NGINX_HTML_DIR/ca.crt")
+
+            local ssl_ctx = ngx.ssl.ctx()
+            local ok, err = ssl_ctx:init({
+                key = key,
+                key_password = "openresty",
+                cert = servercert,
+                cacert = cacert
+            })
+            if not ok then
+                ngx.say("failed to init ssl ctx: ", err)
+                return
+            end
+        }
+    }
+
+--- request
+GET /t
+--- response_body
+failed to init ssl ctx: SSL_CTX_use_PrivateKey() failed
+
+--- user_files eval: $::certfiles
+--- error_log eval
+qr/.*X509_check_private_key:key values mismatch.*/
