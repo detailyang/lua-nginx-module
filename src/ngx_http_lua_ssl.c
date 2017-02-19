@@ -307,7 +307,7 @@ ngx_http_lua_ffi_ssl_ctx_init(const u_char *method,
     ssl_ctx = SSL_CTX_new(ssl_method);
     if (ssl_ctx == NULL) {
         *err = "SSL_CTX_new() failed";
-        ngx_ssl_error(NGX_LOG_EMERG, ngx_cycle->log, 0, *err);
+        ngx_ssl_error(NGX_LOG_ERR, ngx_cycle->log, 0, *err);
         return NULL;
     }
 

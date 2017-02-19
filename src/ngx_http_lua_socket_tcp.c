@@ -1254,7 +1254,7 @@ ngx_http_lua_ffi_socket_tcp_setsslctx(ngx_http_request_t *r,
 #endif /* NGX_LUA_NO_FFI_API */
 
 
-int
+static int
 ngx_http_lua_socket_tcp_sslhandshake(lua_State *L)
 {
     int                      n, top;
