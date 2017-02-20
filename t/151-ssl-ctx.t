@@ -12,7 +12,7 @@ my $openssl_version = eval { `$NginxBinary -V 2>&1` };
 if ($openssl_version =~ m/built with OpenSSL (0|1\.0\.(?:0|1[^\d]|2[a-d]).*)/) {
     plan(skip_all => "too old OpenSSL, need 1.0.2e, was $1");
 } else {
-    plan tests => repeat_each() * (blocks() + 3);
+    plan tests => repeat_each() * (blocks() + 2);
 }
 
 $ENV{TEST_NGINX_HTML_DIR} ||= html_dir();
@@ -76,7 +76,7 @@ __DATA__
 --- request
 GET /t
 --- ignore_response
---- grep_error_log eval: qr/.*/
+--- grep_error_log eval: qr/lua ssl ctx (?:init|free): [0-9A-F]+:\d+/
 --- grep_error_log_out eval
 qr/^lua ssl ctx init: ([0-9A-F]+):1
 lua ssl ctx free: ([0-9A-F]+):1

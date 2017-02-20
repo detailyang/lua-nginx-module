@@ -16,10 +16,6 @@
 static ngx_int_t ngx_http_lua_ssl_ctx_create_method(
     const SSL_METHOD **ssl_method, const u_char *method,
     size_t method_len, char **err);
-static void ngx_http_lua_ssl_ctx_set_default_options(SSL_CTX *ctx);
-static void ngx_http_lua_ssl_info_callback(const ngx_ssl_conn_t *ssl_conn,
-    int where, int ret);
-
 
 #define ngx_http_lua_ssl_check_method(method, method_len, s)             \
     (method_len == sizeof(s) - 1                                         \
@@ -45,6 +41,9 @@ ngx_http_lua_ssl_init(ngx_log_t *log)
 
     return NGX_OK;
 }
+
+
+#ifndef NGX_LUA_NO_FFI_API
 
 
 static ngx_int_t
@@ -157,6 +156,49 @@ ngx_http_lua_ssl_ctx_create_method(const SSL_METHOD **ssl_method,
 
 
 static void
+ngx_http_lua_ssl_info_callback(const ngx_ssl_conn_t *ssl_conn,
+    int where, int ret)
+{
+    BIO               *rbio, *wbio;
+    ngx_connection_t  *c;
+
+    if (where & SSL_CB_HANDSHAKE_START) {
+        c = ngx_ssl_get_connection((ngx_ssl_conn_t *) ssl_conn);
+
+        if (c->ssl->handshaked) {
+            c->ssl->renegotiation = 1;
+            ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "SSL renegotiation");
+        }
+    }
+
+    if ((where & SSL_CB_ACCEPT_LOOP) == SSL_CB_ACCEPT_LOOP) {
+        c = ngx_ssl_get_connection((ngx_ssl_conn_t *) ssl_conn);
+
+        if (!c->ssl->handshake_buffer_set) {
+            /*
+             * By default OpenSSL uses 4k buffer during a handshake,
+             * which is too low for long certificate chains and might
+             * result in extra round-trips.
+             *
+             * To adjust a buffer size we detect that buffering was added
+             * to write side of the connection by comparing rbio and wbio.
+             * If they are different, we assume that it's due to buffering
+             * added to wbio, and set buffer size.
+             */
+
+            rbio = SSL_get_rbio((ngx_ssl_conn_t *) ssl_conn);
+            wbio = SSL_get_wbio((ngx_ssl_conn_t *) ssl_conn);
+
+            if (rbio != wbio) {
+                (void) BIO_set_write_buffer_size(wbio, NGX_SSL_BUFSIZE);
+                c->ssl->handshake_buffer_set = 1;
+            }
+        }
+    }
+}
+
+
+static void
 ngx_http_lua_ssl_ctx_set_default_options(SSL_CTX *ctx)
 {
     /* {{{copy nginx ssl secure options */
@@ -243,52 +285,6 @@ ngx_http_lua_ssl_ctx_set_default_options(SSL_CTX *ctx)
 }
 
 
-static void
-ngx_http_lua_ssl_info_callback(const ngx_ssl_conn_t *ssl_conn,
-    int where, int ret)
-{
-    BIO               *rbio, *wbio;
-    ngx_connection_t  *c;
-
-    if (where & SSL_CB_HANDSHAKE_START) {
-        c = ngx_ssl_get_connection((ngx_ssl_conn_t *) ssl_conn);
-
-        if (c->ssl->handshaked) {
-            c->ssl->renegotiation = 1;
-            ngx_log_debug0(NGX_LOG_DEBUG_EVENT, c->log, 0, "SSL renegotiation");
-        }
-    }
-
-    if ((where & SSL_CB_ACCEPT_LOOP) == SSL_CB_ACCEPT_LOOP) {
-        c = ngx_ssl_get_connection((ngx_ssl_conn_t *) ssl_conn);
-
-        if (!c->ssl->handshake_buffer_set) {
-            /*
-             * By default OpenSSL uses 4k buffer during a handshake,
-             * which is too low for long certificate chains and might
-             * result in extra round-trips.
-             *
-             * To adjust a buffer size we detect that buffering was added
-             * to write side of the connection by comparing rbio and wbio.
-             * If they are different, we assume that it's due to buffering
-             * added to wbio, and set buffer size.
-             */
-
-            rbio = SSL_get_rbio((ngx_ssl_conn_t *) ssl_conn);
-            wbio = SSL_get_wbio((ngx_ssl_conn_t *) ssl_conn);
-
-            if (rbio != wbio) {
-                (void) BIO_set_write_buffer_size(wbio, NGX_SSL_BUFSIZE);
-                c->ssl->handshake_buffer_set = 1;
-            }
-        }
-    }
-}
-
-
-#ifndef NGX_LUA_NO_FFI_API
-
-
 void *
 ngx_http_lua_ffi_ssl_ctx_init(const u_char *method,
     size_t method_len, char **err)
@@ -311,7 +307,7 @@ ngx_http_lua_ffi_ssl_ctx_init(const u_char *method,
         return NULL;
     }
 
-    ngx_log_error(NGX_LOG_DEBUG, ngx_cycle->log, 0,
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, ngx_cycle->log, 0,
                   "lua ssl ctx init: %p:%d", ssl_ctx, ssl_ctx->references);
 
     ngx_http_lua_ssl_ctx_set_default_options(ssl_ctx);
@@ -413,7 +409,7 @@ ngx_http_lua_ffi_ssl_ctx_free(void *cdata)
 {
     SSL_CTX *ssl_ctx = cdata;
 
-    ngx_log_error(NGX_LOG_DEBUG, ngx_cycle->log,
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, ngx_cycle->log,
                   0,
                   "lua ssl ctx free: %p:%d",
                   ssl_ctx,
