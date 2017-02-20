@@ -408,7 +408,7 @@ ngx_http_lua_ffi_ssl_ctx_set_priv_key(void *cdata_ctx, void *cdata_key,
 }
 
 
-int
+void
 ngx_http_lua_ffi_ssl_ctx_free(void *cdata)
 {
     SSL_CTX *ssl_ctx = cdata;
@@ -420,8 +420,6 @@ ngx_http_lua_ffi_ssl_ctx_free(void *cdata)
                   ssl_ctx->references);
 
     SSL_CTX_free(ssl_ctx);
-
-    return 0;
 }
 
 
