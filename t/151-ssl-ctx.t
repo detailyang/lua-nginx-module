@@ -62,7 +62,7 @@ __DATA__
         content_by_lua_block {
             require "defines"
             local ffi = require "ffi"
-            local method = "SSLv2_method"
+            local method = "SSLv23_method"
             local errmsg = ffi.new("char *[1]")
             local ctx = ffi.C.ngx_http_lua_ffi_ssl_ctx_init(method, #method, errmsg)
             if ctx == nil then
