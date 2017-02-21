@@ -304,7 +304,7 @@ ngx_http_lua_ffi_ssl_ctx_init(const u_char *method,
     }
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, ngx_cycle->log, 0,
-                  "lua ssl ctx init: %p:%d", ssl_ctx, ssl_ctx->references);
+                   "lua ssl ctx init: %p:%d", ssl_ctx, ssl_ctx->references);
 
     ngx_http_lua_ssl_ctx_set_default_options(ssl_ctx);
 
@@ -406,10 +406,10 @@ ngx_http_lua_ffi_ssl_ctx_free(void *cdata)
     SSL_CTX *ssl_ctx = cdata;
 
     ngx_log_debug2(NGX_LOG_DEBUG_HTTP, ngx_cycle->log,
-                  0,
-                  "lua ssl ctx free: %p:%d",
-                  ssl_ctx,
-                  ssl_ctx->references);
+                   0,
+                   "lua ssl ctx free: %p:%d",
+                   ssl_ctx,
+                   ssl_ctx->references);
 
     SSL_CTX_free(ssl_ctx);
 }
