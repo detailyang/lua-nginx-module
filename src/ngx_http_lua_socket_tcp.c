@@ -185,7 +185,7 @@ enum {
 
 #if (NGX_HTTP_SSL)
 
-#define ngx_http_lua_ngx_tcp_mt_key  "__ngx_socket_tcp_mt"
+#define ngx_http_lua_ngx_socket_tcp_mt_key  "__ngx_socket_tcp_mt"
 
 #endif
 
@@ -329,7 +329,7 @@ ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
 
     /* expose tcp object metatable to global for FFI */
     lua_pushvalue(L, -1);
-    lua_setglobal(L, ngx_http_lua_ngx_tcp_mt_key);
+    lua_setglobal(L, ngx_http_lua_ngx_socket_tcp_mt_key);
 
 #endif /* NGX_LUA_NO_FFI_API */
 
