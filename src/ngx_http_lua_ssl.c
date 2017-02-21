@@ -13,10 +13,6 @@
 #if (NGX_HTTP_SSL)
 
 
-static ngx_int_t ngx_http_lua_ssl_ctx_create_method(
-    const SSL_METHOD **ssl_method, const u_char *method,
-    size_t method_len, char **err);
-
 #define ngx_http_lua_ssl_check_method(method, method_len, s)             \
     (method_len == sizeof(s) - 1                                         \
     && ngx_strncmp((method), (s), method_len) == 0)
