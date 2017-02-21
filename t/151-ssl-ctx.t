@@ -112,7 +112,7 @@ SSLv3 methods disabled
 
 
 
-=== TEST 3: ssl ctx init - disable ssl protocols method TLSv1 TLSv1.1 TLSv1.2
+=== TEST 3: ssl ctx init - allow ssl protocols method TLSv1 TLSv1.1 TLSv1.2
 --- config
     location /t {
         content_by_lua_block {
