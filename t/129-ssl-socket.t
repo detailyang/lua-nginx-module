@@ -212,7 +212,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -220,7 +220,7 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                local session, err = sock:sslhandshake(nil, "iscribblet.org")
+                local session, err = sock:sslhandshake(nil, "openresty.org")
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -228,7 +228,7 @@ SSL reused session
 
                 ngx.say("ssl handshake: ", type(session))
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -268,7 +268,7 @@ qr/^lua ssl save session: ([0-9A-F]+):2
 lua ssl free session: ([0-9A-F]+):1
 $/
 --- error_log
-lua ssl server name: "iscribblet.org"
+lua ssl server name: "openresty.org"
 --- no_error_log
 SSL reused session
 [error]
@@ -293,7 +293,7 @@ SSL reused session
 
             local session
             for i = 1, 2 do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -301,7 +301,7 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                session, err = sock:sslhandshake(session, "iscribblet.org")
+                session, err = sock:sslhandshake(session, "openresty.org")
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -309,7 +309,7 @@ SSL reused session
 
                 ngx.say("ssl handshake: ", type(session))
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -558,7 +558,7 @@ SSL reused session
 
                 ngx.say("ssl handshake: ", type(session))
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -608,7 +608,7 @@ SSL reused session
 
 
 
-=== TEST 8: iscribblet.org: passing SSL verify
+=== TEST 8: openresty.org: passing SSL verify
 --- config
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
@@ -623,7 +623,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -631,7 +631,7 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                local session, err = sock:sslhandshake(nil, "iscribblet.org", true)
+                local session, err = sock:sslhandshake(nil, "openresty.org", true)
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -639,7 +639,7 @@ SSL reused session
 
                 ngx.say("ssl handshake: ", type(session))
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -684,7 +684,7 @@ lua ssl free session: ([0-9A-F]+):1
 $/
 
 --- error_log
-lua ssl server name: "iscribblet.org"
+lua ssl server name: "openresty.org"
 --- no_error_log
 SSL reused session
 [error]
@@ -708,7 +708,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -716,14 +716,14 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                local session, err = sock:sslhandshake(nil, "iscribblet.org", true)
+                local session, err = sock:sslhandshake(nil, "openresty.org", true)
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                 else
                     ngx.say("ssl handshake: ", type(session))
                 end
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -762,7 +762,7 @@ failed to send http request: closed
 --- grep_error_log eval: qr/lua ssl (?:set|save|free) session: [0-9A-F]+:\d+/
 --- grep_error_log_out
 --- error_log
-lua ssl server name: "iscribblet.org"
+lua ssl server name: "openresty.org"
 lua ssl certificate verify error: (20: unable to get local issuer certificate)
 --- no_error_log
 SSL reused session
@@ -787,7 +787,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -795,14 +795,14 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                local session, err = sock:sslhandshake(nil, "iscribblet.org", true)
+                local session, err = sock:sslhandshake(nil, "openresty.org", true)
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                 else
                     ngx.say("ssl handshake: ", type(session))
                 end
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -841,7 +841,7 @@ failed to send http request: closed
 --- grep_error_log eval: qr/lua ssl (?:set|save|free) session: [0-9A-F]+:\d+/
 --- grep_error_log_out
 --- error_log
-lua ssl server name: "iscribblet.org"
+lua ssl server name: "openresty.org"
 --- no_error_log
 lua ssl certificate verify error
 SSL reused session
@@ -1030,7 +1030,7 @@ SSL reused session
 
 
 
-=== TEST 13: iscribblet.org: passing SSL verify with multiple certificates
+=== TEST 13: openresty.org: passing SSL verify with multiple certificates
 --- config
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
@@ -1045,7 +1045,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -1053,7 +1053,7 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                local session, err = sock:sslhandshake(nil, "iscribblet.org", true)
+                local session, err = sock:sslhandshake(nil, "openresty.org", true)
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -1061,7 +1061,7 @@ SSL reused session
 
                 ngx.say("ssl handshake: ", type(session))
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -1107,7 +1107,7 @@ lua ssl free session: ([0-9A-F]+):1
 $/
 
 --- error_log
-lua ssl server name: "iscribblet.org"
+lua ssl server name: "openresty.org"
 --- no_error_log
 SSL reused session
 [error]
@@ -1129,7 +1129,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -1137,7 +1137,7 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                local session, err = sock:sslhandshake(nil, "iscribblet.org")
+                local session, err = sock:sslhandshake(nil, "openresty.org")
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -1145,7 +1145,7 @@ SSL reused session
 
                 ngx.say("ssl handshake: ", type(session))
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -1185,7 +1185,7 @@ qr/^lua ssl save session: ([0-9A-F]+):2
 lua ssl free session: ([0-9A-F]+):1
 $/
 --- error_log
-lua ssl server name: "iscribblet.org"
+lua ssl server name: "openresty.org"
 SSL: TLSv1.2, cipher: "ECDHE-RSA-RC4-SHA SSLv3
 --- no_error_log
 SSL reused session
@@ -1209,7 +1209,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -1217,7 +1217,7 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                local session, err = sock:sslhandshake(nil, "iscribblet.org")
+                local session, err = sock:sslhandshake(nil, "openresty.org")
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -1225,7 +1225,7 @@ SSL reused session
 
                 ngx.say("ssl handshake: ", type(session))
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -1265,7 +1265,7 @@ qr/^lua ssl save session: ([0-9A-F]+):2
 lua ssl free session: ([0-9A-F]+):1
 $/
 --- error_log
-lua ssl server name: "iscribblet.org"
+lua ssl server name: "openresty.org"
 SSL: TLSv1.2, cipher: "RC4-SHA SSLv3
 --- no_error_log
 SSL reused session
@@ -1289,7 +1289,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -1297,7 +1297,7 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                local session, err = sock:sslhandshake(nil, "iscribblet.org")
+                local session, err = sock:sslhandshake(nil, "openresty.org")
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -1305,7 +1305,7 @@ SSL reused session
 
                 ngx.say("ssl handshake: ", type(session))
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -1345,7 +1345,7 @@ qr/^lua ssl save session: ([0-9A-F]+):2
 lua ssl free session: ([0-9A-F]+):1
 $/
 --- error_log
-lua ssl server name: "iscribblet.org"
+lua ssl server name: "openresty.org"
 SSL: TLSv1, cipher: "ECDHE-RSA-RC4-SHA SSLv3
 --- no_error_log
 SSL reused session
@@ -1370,7 +1370,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -1378,14 +1378,14 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                local session, err = sock:sslhandshake(nil, "iscribblet.org")
+                local session, err = sock:sslhandshake(nil, "openresty.org")
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                 else
                     ngx.say("ssl handshake: ", type(session))
                 end
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -1422,7 +1422,7 @@ failed to send http request: closed
 --- error_log eval
 [
 qr/\[crit\] .*?SSL_do_handshake\(\) failed .*?unsupported protocol/,
-'lua ssl server name: "iscribblet.org"',
+'lua ssl server name: "openresty.org"',
 ]
 --- no_error_log
 SSL reused session
@@ -1432,7 +1432,7 @@ SSL reused session
 
 
 
-=== TEST 18: iscribblet.org: passing SSL verify: keepalive (reuse the ssl session)
+=== TEST 18: openresty.org: passing SSL verify: keepalive (reuse the ssl session)
 --- config
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
@@ -1450,7 +1450,7 @@ SSL reused session
 
             local session
             for i = 1, 3 do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -1458,7 +1458,7 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                session, err = sock:sslhandshake(session, "iscribblet.org", true)
+                session, err = sock:sslhandshake(session, "openresty.org", true)
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -1509,7 +1509,7 @@ SSL reused session
 
 
 
-=== TEST 19: iscribblet.org: passing SSL verify: keepalive (no reusing the ssl session)
+=== TEST 19: openresty.org: passing SSL verify: keepalive (no reusing the ssl session)
 --- config
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
@@ -1526,7 +1526,7 @@ SSL reused session
             do
 
             for i = 1, 3 do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -1534,7 +1534,7 @@ SSL reused session
 
                 ngx.say("connected: ", ok)
 
-                local session, err = sock:sslhandshake(nil, "iscribblet.org", true)
+                local session, err = sock:sslhandshake(nil, "openresty.org", true)
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -2042,7 +2042,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -2051,7 +2051,7 @@ SSL reused session
                 ngx.say("connected: ", ok)
 
                 for i = 1, 2 do
-                    local session, err = sock:sslhandshake(nil, "iscribblet.org")
+                    local session, err = sock:sslhandshake(nil, "openresty.org")
                     if not session then
                         ngx.say("failed to do SSL handshake: ", err)
                         return
@@ -2060,7 +2060,7 @@ SSL reused session
                     ngx.say("ssl handshake: ", type(session))
                 end
 
-                local req = "GET / HTTP/1.1\\r\\nHost: iscribblet.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: openresty.org\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -2103,7 +2103,7 @@ lua ssl free session: ([0-9A-F]+):2
 lua ssl free session: ([0-9A-F]+):1
 $/
 --- error_log
-lua ssl server name: "iscribblet.org"
+lua ssl server name: "openresty.org"
 --- no_error_log
 SSL reused session
 [error]
@@ -2126,7 +2126,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("iscribblet.org", 443)
+                local ok, err = sock:connect("openresty.org", 443)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -2135,7 +2135,7 @@ SSL reused session
                 ngx.say("connected: ", ok)
 
                 sock:settimeout(1);  -- should timeout immediately
-                local session, err = sock:sslhandshake(nil, "iscribblet.org")
+                local session, err = sock:sslhandshake(nil, "openresty.org")
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -2157,7 +2157,7 @@ failed to do SSL handshake: timeout
 --- grep_error_log eval: qr/lua ssl (?:set|save|free) session: [0-9A-F]+:\d+/
 --- grep_error_log_out
 --- error_log
-lua ssl server name: "iscribblet.org"
+lua ssl server name: "openresty.org"
 --- no_error_log
 SSL reused session
 [error]
