@@ -17,10 +17,22 @@ char *ngx_http_lua_package_cpath(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
 char *ngx_http_lua_package_path(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
+char *ngx_http_lua_regex_cache_max_entries(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf);
+char *ngx_http_lua_regex_match_limit(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf);
+char *ngx_http_lua_precontent_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf);
+char *ngx_http_lua_precontent_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf);
 char *ngx_http_lua_content_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
 char *ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
+char *ngx_http_lua_server_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf);
+char *ngx_http_lua_server_rewrite_by_lua_block(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf);
 char *ngx_http_lua_rewrite_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
 char *ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
@@ -49,7 +61,13 @@ char *ngx_http_lua_init_worker_by_lua_block(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf);
 char *ngx_http_lua_init_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
+char *ngx_http_lua_exit_worker_by_lua_block(ngx_conf_t *cf,
+    ngx_command_t *cmd, void *conf);
+char *ngx_http_lua_exit_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf);
 char *ngx_http_lua_code_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+char *ngx_http_lua_load_resty_core(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf);
 
 #if defined(NDK) && NDK
 
@@ -67,10 +85,12 @@ ngx_int_t ngx_http_lua_filter_set_by_lua_file(ngx_http_request_t *r,
 
 char *ngx_http_lua_rewrite_no_postpone(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
-
 char *ngx_http_lua_conf_lua_block_parse(ngx_conf_t *cf,
     ngx_command_t *cmd);
-
+char *ngx_http_lua_capture_error_log(ngx_conf_t *cf, ngx_command_t *cmd,
+    void *conf);
+u_char *ngx_http_lua_gen_chunk_name(ngx_conf_t *cf, const char *tag,
+    size_t tag_len, size_t *chunkname_len);
 
 #endif /* _NGX_HTTP_LUA_DIRECTIVE_H_INCLUDED_ */
 

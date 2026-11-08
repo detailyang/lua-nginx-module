@@ -41,6 +41,7 @@ ngx_http_lua_ssl_sess_fetch_handler_file(ngx_http_request_t *r,
 
     rc = ngx_http_lua_cache_loadfile(r->connection->log, L,
                                      lscf->srv.ssl_sess_fetch_src.data,
+                                     &lscf->srv.ssl_sess_fetch_src_ref,
                                      lscf->srv.ssl_sess_fetch_src_key);
     if (rc != NGX_OK) {
         return rc;
@@ -63,8 +64,9 @@ ngx_http_lua_ssl_sess_fetch_handler_inline(ngx_http_request_t *r,
     rc = ngx_http_lua_cache_loadbuffer(r->connection->log, L,
                                        lscf->srv.ssl_sess_fetch_src.data,
                                        lscf->srv.ssl_sess_fetch_src.len,
+                                       &lscf->srv.ssl_sess_fetch_src_ref,
                                        lscf->srv.ssl_sess_fetch_src_key,
-                                       "=ssl_session_fetch_by_lua_block");
+                             (const char *) lscf->srv.ssl_sess_fetch_chunkname);
     if (rc != NGX_OK) {
         return rc;
     }
@@ -100,14 +102,16 @@ char *
 ngx_http_lua_ssl_sess_fetch_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
 {
-    u_char                      *p;
+    size_t                       chunkname_len;
+    u_char                      *chunkname;
+    u_char                      *cache_key = NULL;
     u_char                      *name;
     ngx_str_t                   *value;
     ngx_http_lua_srv_conf_t     *lscf = conf;
 
     dd("enter");
 
-    /*  must specifiy a content handler */
+    /*  must specify a content handler */
     if (cmd->post == NULL) {
         return NGX_CONF_ERROR;
     }
@@ -127,43 +131,42 @@ ngx_http_lua_ssl_sess_fetch_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 
     if (cmd->post == ngx_http_lua_ssl_sess_fetch_handler_file) {
         /* Lua code in an external file */
-
         name = ngx_http_lua_rebase_path(cf->pool, value[1].data,
                                         value[1].len);
         if (name == NULL) {
             return NGX_CONF_ERROR;
         }
 
+        cache_key = ngx_http_lua_gen_file_cache_key(cf, value[1].data,
+                                                    value[1].len);
+        if (cache_key == NULL) {
+            return NGX_CONF_ERROR;
+        }
+
         lscf->srv.ssl_sess_fetch_src.data = name;
         lscf->srv.ssl_sess_fetch_src.len = ngx_strlen(name);
 
-        p = ngx_palloc(cf->pool, NGX_HTTP_LUA_FILE_KEY_LEN + 1);
-        if (p == NULL) {
-            return NGX_CONF_ERROR;
-        }
-
-        lscf->srv.ssl_sess_fetch_src_key = p;
-
-        p = ngx_copy(p, NGX_HTTP_LUA_FILE_TAG, NGX_HTTP_LUA_FILE_TAG_LEN);
-        p = ngx_http_lua_digest_hex(p, value[1].data, value[1].len);
-        *p = '\0';
-
     } else {
-        /* inlined Lua code */
-
-        lscf->srv.ssl_sess_fetch_src = value[1];
-
-        p = ngx_palloc(cf->pool, NGX_HTTP_LUA_INLINE_KEY_LEN + 1);
-        if (p == NULL) {
+        cache_key = ngx_http_lua_gen_chunk_cache_key(cf,
+                                                     "ssl_session_fetch_by_lua",
+                                                     value[1].data,
+                                                     value[1].len);
+        if (cache_key == NULL) {
             return NGX_CONF_ERROR;
         }
 
-        lscf->srv.ssl_sess_fetch_src_key = p;
+        chunkname = ngx_http_lua_gen_chunk_name(cf, "ssl_session_fetch_by_lua",
+                        sizeof("ssl_session_fetch_by_lua") - 1, &chunkname_len);
+        if (chunkname == NULL) {
+            return NGX_CONF_ERROR;
+        }
 
-        p = ngx_copy(p, NGX_HTTP_LUA_INLINE_TAG, NGX_HTTP_LUA_INLINE_TAG_LEN);
-        p = ngx_http_lua_digest_hex(p, value[1].data, value[1].len);
-        *p = '\0';
+        /* Don't eval nginx variables for inline lua code */
+        lscf->srv.ssl_sess_fetch_src = value[1];
+        lscf->srv.ssl_sess_fetch_chunkname = chunkname;
     }
+
+    lscf->srv.ssl_sess_fetch_src_key = cache_key;
 
     return NGX_CONF_OK;
 }
@@ -171,9 +174,15 @@ ngx_http_lua_ssl_sess_fetch_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 
 /* cached session fetching callback to be set with SSL_CTX_sess_set_get_cb */
 ngx_ssl_session_t *
-ngx_http_lua_ssl_sess_fetch_handler(ngx_ssl_conn_t *ssl_conn, u_char *id,
-    int len, int *copy)
+ngx_http_lua_ssl_sess_fetch_handler(ngx_ssl_conn_t *ssl_conn,
+#if OPENSSL_VERSION_NUMBER >= 0x10100003L
+    const
+#endif
+    u_char *id, int len, int *copy)
 {
+#if defined(NGX_SSL_TLSv1_3) && defined(TLS1_3_VERSION)
+    int                              tls_version;
+#endif
     lua_State                       *L;
     ngx_int_t                        rc;
     ngx_connection_t                *c, *fc = NULL;
@@ -191,7 +200,20 @@ ngx_http_lua_ssl_sess_fetch_handler(ngx_ssl_conn_t *ssl_conn, u_char *id,
 
     c = ngx_ssl_get_connection(ssl_conn);
 
-    dd("c = %p", c);
+#if defined(NGX_SSL_TLSv1_3) && defined(TLS1_3_VERSION)
+    tls_version = SSL_version(ssl_conn);
+
+    if (tls_version >= TLS1_3_VERSION) {
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
+                       "ssl_session_fetch_by_lua*: skipped since "
+                       "TLS version >= 1.3 (%xd)", tls_version);
+
+        return 0;
+    }
+#endif
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
+                   "ssl session fetch: connection reusable: %ud", c->reusable);
 
     cctx = ngx_http_lua_ssl_get_ctx(c->ssl->connection);
 
@@ -224,6 +246,10 @@ ngx_http_lua_ssl_sess_fetch_handler(ngx_ssl_conn_t *ssl_conn, u_char *id,
 
     dd("first time");
 
+#if (nginx_version < 1017009)
+    ngx_reusable_connection(c, 0);
+#endif
+
     hc = c->data;
 
     fc = ngx_http_lua_create_fake_connection(NULL);
@@ -252,26 +278,11 @@ ngx_http_lua_ssl_sess_fetch_handler(ngx_ssl_conn_t *ssl_conn, u_char *id,
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
-#if defined(nginx_version) && nginx_version >= 1003014
-
-#   if nginx_version >= 1009000
-
+#if (nginx_version >= 1009000)
     ngx_set_connection_log(fc, clcf->error_log);
 
-#   else
-
-    ngx_http_set_connection_log(fc, clcf->error_log);
-
-#   endif
-
 #else
-
-    fc->log->file = clcf->error_log->file;
-
-    if (!(fc->log->log_level & NGX_LOG_DEBUG_CONNECTION)) {
-        fc->log->log_level = clcf->error_log->log_level;
-    }
-
+    ngx_http_set_connection_log(fc, clcf->error_log);
 #endif
 
     if (cctx == NULL) {
@@ -279,12 +290,14 @@ ngx_http_lua_ssl_sess_fetch_handler(ngx_ssl_conn_t *ssl_conn, u_char *id,
         if (cctx == NULL) {
             goto failed;  /* error */
         }
+
+        cctx->ctx_ref = LUA_NOREF;
     }
 
     cctx->exit_code = 1;  /* successful by default */
     cctx->connection = c;
     cctx->request = r;
-    cctx->session_id.data = id;
+    cctx->session_id.data = (u_char *) id;
     cctx->session_id.len = len;
     cctx->entered_sess_fetch_handler = 1;
     cctx->done = 0;
@@ -403,7 +416,7 @@ ngx_http_lua_ssl_sess_fetch_aborted(void *data)
 {
     ngx_http_lua_ssl_ctx_t          *cctx = data;
 
-    dd("lua ssl sess_fetch done");
+    dd("lua ssl sess_fetch aborted");
 
     if (cctx->done) {
         /* completed successfully already */
@@ -438,15 +451,18 @@ ngx_http_lua_log_ssl_sess_fetch_error(ngx_log_t *log, u_char *buf, size_t len)
 
     c = log->data;
 
-    if (c->addr_text.len) {
-        p = ngx_snprintf(buf, len, ", client: %V", &c->addr_text);
-        len -= p - buf;
-        buf = p;
-    }
+    if (c != NULL) {
+        if (c->addr_text.len) {
+            p = ngx_snprintf(buf, len, ", client: %V", &c->addr_text);
+            len -= p - buf;
+            buf = p;
+        }
 
-    if (c && c->listening && c->listening->addr_text.len) {
-        p = ngx_snprintf(buf, len, ", server: %V", &c->listening->addr_text);
-        buf = p;
+        if (c->listening && c->listening->addr_text.len) {
+            p = ngx_snprintf(buf, len, ", server: %V",
+                             &c->listening->addr_text);
+            buf = p;
+        }
     }
 
     return buf;
@@ -461,14 +477,16 @@ ngx_http_lua_ssl_sess_fetch_by_chunk(lua_State *L, ngx_http_request_t *r)
     ngx_int_t                rc;
     lua_State               *co;
     ngx_http_lua_ctx_t      *ctx;
-    ngx_http_cleanup_t      *cln;
+    ngx_pool_cleanup_t      *cln;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
 
     if (ctx == NULL) {
         ctx = ngx_http_lua_create_ctx(r);
         if (ctx == NULL) {
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            rc = NGX_ERROR;
+            ngx_http_lua_finalize_request(r, rc);
+            return rc;
         }
 
     } else {
@@ -485,15 +503,19 @@ ngx_http_lua_ssl_sess_fetch_by_chunk(lua_State *L, ngx_http_request_t *r)
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "lua: failed to create new coroutine to handle request");
 
-        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        rc = NGX_ERROR;
+        ngx_http_lua_finalize_request(r, rc);
+        return rc;
     }
 
     /*  move code closure to new coroutine */
     lua_xmove(L, co, 1);
 
+#ifndef OPENRESTY_LUAJIT
     /*  set closure's env table to new coroutine's globals table */
     ngx_http_lua_get_globals_table(co);
     lua_setfenv(co, -2);
+#endif
 
     /* save nginx request in coroutine globals table */
     ngx_http_lua_set_req(co, r);
@@ -505,11 +527,15 @@ ngx_http_lua_ssl_sess_fetch_by_chunk(lua_State *L, ngx_http_request_t *r)
     ctx->cur_co_ctx->co_top = 1;
 #endif
 
+    ngx_http_lua_attach_co_ctx_to_L(co, ctx->cur_co_ctx);
+
     /* register request cleanup hooks */
     if (ctx->cleanup == NULL) {
-        cln = ngx_http_cleanup_add(r, 0);
+        cln = ngx_pool_cleanup_add(r->pool, 0);
         if (cln == NULL) {
-            return NGX_HTTP_INTERNAL_SERVER_ERROR;
+            rc = NGX_ERROR;
+            ngx_http_lua_finalize_request(r, rc);
+            return rc;
         }
 
         cln->handler = ngx_http_lua_request_cleanup_handler;
@@ -539,8 +565,6 @@ ngx_http_lua_ssl_sess_fetch_by_chunk(lua_State *L, ngx_http_request_t *r)
 }
 
 
-#ifndef NGX_LUA_NO_FFI_API
-
 /* de-serialized a SSL session and set it back to the request at lua context */
 int
 ngx_http_lua_ffi_ssl_set_serialized_session(ngx_http_request_t *r,
@@ -551,6 +575,7 @@ ngx_http_lua_ffi_ssl_set_serialized_session(ngx_http_request_t *r,
     ngx_ssl_conn_t                  *ssl_conn;
     ngx_connection_t                *c;
     ngx_ssl_session_t               *session = NULL;
+    ngx_ssl_session_t               *old_session;
     ngx_http_lua_ssl_ctx_t          *cctx;
 
     c = r->connection;
@@ -566,6 +591,11 @@ ngx_http_lua_ffi_ssl_set_serialized_session(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    if (len <= 0 || (size_t) len > sizeof(buf)) {
+        *err = "invalid session length";
+        return NGX_ERROR;
+    }
+
     ngx_memcpy(buf, data, len);
     p = buf;
     session = d2i_SSL_SESSION(NULL, (const unsigned char **)&p,  len);
@@ -577,16 +607,20 @@ ngx_http_lua_ffi_ssl_set_serialized_session(ngx_http_request_t *r,
 
     cctx = ngx_http_lua_ssl_get_ctx(c->ssl->connection);
     if (cctx == NULL) {
+        ngx_ssl_free_session(session);
         *err = "bad lua context";
         return NGX_ERROR;
     }
 
+    old_session = cctx->session;
     cctx->session = session;
+
+    if (old_session != NULL) {
+        ngx_ssl_free_session(old_session);
+    }
 
     return NGX_OK;
 }
-
-#endif  /* NGX_LUA_NO_FFI_API */
 
 
 #endif /* NGX_HTTP_SSL */

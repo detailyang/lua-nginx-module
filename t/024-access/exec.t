@@ -4,7 +4,7 @@ use Test::Nginx::Socket::Lua;
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 2 + 2);
+plan tests => repeat_each() * (blocks() * 2 + 6);
 
 #no_diff();
 #no_long_string();
@@ -326,7 +326,7 @@ hello
 --- config
     location /main {
         access_by_lua '
-            res = ngx.location.capture("/test_loc");
+            local res = ngx.location.capture("/test_loc");
             ngx.print("hello, ", res.body)
         ';
         content_by_lua return;
@@ -369,3 +369,25 @@ GET /read
 'unsafe URI "/hi/../" was detected',
 qr/runtime error: access_by_lua\(nginx.conf:\d+\):2: unsafe uri/,
 ]
+
+
+
+=== TEST 17: pipelined requests
+--- config
+    location /t {
+        access_by_lua_block {
+            ngx.exec("@foo")
+        }
+    }
+
+    location @foo {
+        return 200;
+    }
+--- pipelined_requests eval
+["GET /t", "GET /t"]
+--- error_code eval
+[200, 200]
+--- response_body eval
+["", ""]
+--- no_error_log
+[error]

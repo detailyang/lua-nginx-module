@@ -7,9 +7,6 @@
  */
 
 
-#ifndef NGX_LUA_NO_FFI_API
-
-
 #ifndef DDEBUG
 #define DDEBUG 0
 #endif
@@ -40,7 +37,7 @@ void ngx_http_lua_ffi_sema_gc(ngx_http_lua_sema_t *sem);
 
 enum {
     SEMAPHORE_WAIT_SUCC = 0,
-    SEMAPHORE_WAIT_TIMEOUT = 1
+    SEMAPHORE_WAIT_TIMEOUT = 1,
 };
 
 
@@ -85,6 +82,8 @@ ngx_http_lua_alloc_sema(void)
 
     lmcf = ngx_http_cycle_get_module_main_conf(ngx_cycle,
                                                ngx_http_lua_module);
+
+    ngx_http_lua_assert(lmcf != NULL);
 
     mm = lmcf->sema_mm;
 
@@ -172,6 +171,8 @@ ngx_http_lua_sema_mm_cleanup(void *data)
         sem = ngx_queue_data(q, ngx_http_lua_sema_t, chain);
         block = sem->block;
 
+        ngx_http_lua_assert(block != NULL);
+
         if (block->used == 0) {
             iter = (ngx_http_lua_sema_t *) (block + 1);
 
@@ -258,6 +259,7 @@ ngx_http_lua_sema_resume(ngx_http_request_t *r)
     lua_State                   *vm;
     ngx_connection_t            *c;
     ngx_int_t                    rc;
+    ngx_uint_t                   nreqs;
     ngx_http_lua_ctx_t          *ctx;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
@@ -269,6 +271,7 @@ ngx_http_lua_sema_resume(ngx_http_request_t *r)
 
     c = r->connection;
     vm = ngx_http_lua_get_lua_vm(r, ctx);
+    nreqs = c->requests;
 
     if (ctx->cur_co_ctx->sem_resume_status == SEMAPHORE_WAIT_SUCC) {
         lua_pushboolean(ctx->cur_co_ctx->co, 1);
@@ -285,12 +288,12 @@ ngx_http_lua_sema_resume(ngx_http_request_t *r)
                    "lua run thread returned %d", rc);
 
     if (rc == NGX_AGAIN) {
-        return ngx_http_lua_run_posted_threads(c, vm, r, ctx);
+        return ngx_http_lua_run_posted_threads(c, vm, r, ctx, nreqs);
     }
 
     if (rc == NGX_DONE) {
         ngx_http_lua_finalize_request(r, NGX_DONE);
-        return ngx_http_lua_run_posted_threads(c, vm, r, ctx);
+        return ngx_http_lua_run_posted_threads(c, vm, r, ctx, nreqs);
     }
 
     /* rc == NGX_ERROR || rc >= NGX_OK */
@@ -340,7 +343,7 @@ ngx_http_lua_ffi_sema_post(ngx_http_lua_sema_t *sem, int n)
     sem->resource_count += n;
 
     if (!ngx_queue_empty(&sem->wait_queue)) {
-        /* we need the extra paranthese around the first argument of
+        /* we need the extra parentheses around the first argument of
          * ngx_post_event() just to work around macro issues in nginx
          * cores older than nginx 1.7.12 (exclusive).
          */
@@ -376,19 +379,15 @@ ngx_http_lua_ffi_sema_wait(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    rc = ngx_http_lua_ffi_check_context(ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
-                                        | NGX_HTTP_LUA_CONTEXT_ACCESS
-                                        | NGX_HTTP_LUA_CONTEXT_CONTENT
-                                        | NGX_HTTP_LUA_CONTEXT_TIMER
-                                        | NGX_HTTP_LUA_CONTEXT_SSL_CERT,
+    rc = ngx_http_lua_ffi_check_context(ctx, NGX_HTTP_LUA_CONTEXT_YIELDABLE,
                                         err, errlen);
 
     if (rc != NGX_OK) {
         return NGX_ERROR;
     }
 
-    /* we keep the order, will resume the older waited firtly
-     * in ngx_http_lua_sema_handler
+    /* we keep the order, will first resume the thread waiting for the
+     * longest time in ngx_http_lua_sema_handler
      */
 
     if (ngx_queue_empty(&sem->wait_queue) && sem->resource_count > 0) {
@@ -467,8 +466,11 @@ ngx_http_lua_sema_handler(ngx_event_t *ev)
 
     sem = ev->data;
 
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, ngx_cycle->log, 0,
+                   "semaphore handler: wait queue: %sempty, resource count: %d",
+                   ngx_queue_empty(&sem->wait_queue) ? "" : "not ",
+                   sem->resource_count);
     while (!ngx_queue_empty(&sem->wait_queue) && sem->resource_count > 0) {
-
         q = ngx_queue_head(&sem->wait_queue);
         ngx_queue_remove(q);
 
@@ -557,17 +559,22 @@ ngx_http_lua_ffi_sema_gc(ngx_http_lua_sema_t *sem)
         return;
     }
 
-    if (!ngx_queue_empty(&sem->wait_queue)) {
-        ngx_log_error(NGX_LOG_CRIT, ngx_cycle->log, 0,
+    if (!ngx_terminate
+        && !ngx_quit
+        && !ngx_queue_empty(&sem->wait_queue))
+    {
+        ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                       "in lua semaphore gc wait queue is"
                       " not empty while the semaphore %p is being "
                       "destroyed", sem);
     }
 
+    if (sem->sem_event.posted) {
+        ngx_delete_posted_event(&sem->sem_event);
+    }
+
     ngx_http_lua_free_sema(sem);
 }
 
-
-#endif /* NGX_LUA_NO_FFI_API */
 
 /* vi:set ft=c ts=4 sw=4 et fdm=marker: */

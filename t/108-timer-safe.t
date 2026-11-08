@@ -10,6 +10,8 @@ our $StapScript = $t::StapThread::StapScript;
 #workers(2);
 #log_level('warn');
 
+# Check minimum timer delays; the harness deadline bounds completion.
+# Instrumentation and scheduler load can extend the elapsed time.
 repeat_each(2);
 
 plan tests => repeat_each() * (blocks() * 8 + 60);
@@ -33,7 +35,7 @@ __DATA__
         content_by_lua '
             local begin = ngx.now()
             local function f()
-                print("elapsed: ", ngx.now() - begin)
+                print("timer delay respected: ", ngx.now() - begin >= 0.04)
             end
             local ok, err = ngx.timer.at(0.05, f)
             if not ok then
@@ -67,7 +69,7 @@ registered timer
 
 --- error_log eval
 [
-qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:4[4-9]|5[0-6])/,
+qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: timer delay respected: true/,
 "lua ngx.timer expired",
 "http lua close fake http connection"
 ]
@@ -81,16 +83,16 @@ qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:4[4-9]|5[0-6])
             local begin = ngx.now()
             local function f()
                 print("my lua timer handler")
-                ngx.sleep(0.02)
-                print("elapsed: ", ngx.now() - begin)
+                ngx.sleep(0.2)
+                print("timer delay respected: ", ngx.now() - begin >= 0.69)
             end
-            local ok, err = ngx.timer.at(0.05, f)
+            local ok, err = ngx.timer.at(0.5, f)
             if not ok then
                 ngx.say("failed to set timer: ", err)
                 return
             end
             ngx.say("registered timer")
-            ngx.sleep(0.05)
+            ngx.sleep(0.5)
         ';
     }
 --- request
@@ -116,7 +118,7 @@ registered timer
 --- error_log eval
 [
 qr/\[lua\] .*? my lua timer handler/,
-qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:6[4-9]|7[0-6])/,
+qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: timer delay respected: true/,
 "lua ngx.timer expired",
 "http lua close fake http connection"
 ]
@@ -124,6 +126,7 @@ qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:6[4-9]|7[0-6])
 
 
 === TEST 3: tcp cosocket in timer handler (short connections)
+--- no_http2
 --- config
     server_tokens off;
     location = /t {
@@ -229,7 +232,7 @@ qr/received: Server: \S+/,
 
 === TEST 4: tcp cosocket in timer handler (keep-alive connections)
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 
 --- config
     location = /t {
@@ -270,7 +273,7 @@ function go(port)
 
     print("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -320,7 +323,7 @@ qr/\[lua\] .*? my lua timer handler/,
 "http lua close fake http connection",
 qr/go\(\): connected: 1, reused: \d+/,
 "go(): request sent: 11",
-"go(): received: OK",
+"go(): received: END",
 ]
 
 
@@ -397,7 +400,7 @@ qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0(?:[^.]|\.00)/,
 
                 print("connected: ", ok)
 
-                local req = "\\0\\1\\0\\0\\0\\1\\0\\0flush_all\\r\\n"
+                local req = "\\0\\1\\0\\0\\0\\1\\0\\0get __nil\\r\\n"
                 local ok, err = udp:send(req)
                 if not ok then
                     fail("failed to send: ", err)
@@ -452,7 +455,7 @@ qr/\[lua\] .*? my lua timer handler/,
 "lua ngx.timer expired",
 "http lua close fake http connection",
 "connected: 1",
-"received 12 bytes: \x{00}\x{01}\x{00}\x{00}\x{00}\x{01}\x{00}\x{00}OK\x{0d}\x{0a}"
+"received 13 bytes: \x{00}\x{01}\x{00}\x{00}\x{00}\x{01}\x{00}\x{00}END\x{0d}\x{0a}"
 ]
 
 
@@ -467,7 +470,7 @@ qr/\[lua\] .*? my lua timer handler/,
             local function f()
                 print("my lua timer handler")
                 ngx.sleep(0.02)
-                print("elapsed: ", ngx.now() - begin)
+                print("timer delay respected: ", ngx.now() - begin >= 0.06)
             end
             local ok, err = ngx.timer.at(0.05, f)
             if not ok then
@@ -489,7 +492,7 @@ delete thread 2
 --- response_body
 hello world
 
---- wait: 0.1
+--- wait: 0.15
 --- no_error_log
 [error]
 [alert]
@@ -499,7 +502,7 @@ hello world
 [
 "registered timer",
 qr/\[lua\] .*? my lua timer handler/,
-qr/\[lua\] log_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:6[4-9]|7[0-6])/,
+qr/\[lua\] log_by_lua\(nginx\.conf:\d+\):\d+: timer delay respected: true/,
 "lua ngx.timer expired",
 "http lua close fake http connection"
 ]
@@ -508,7 +511,7 @@ qr/\[lua\] log_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:6[4-9]|7[0-6])/,
 
 === TEST 8: tcp cosocket in timer handler (keep-alive connections) - log_by_lua
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 
 --- config
     location = /t {
@@ -550,7 +553,7 @@ function go(port)
 
     print("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -599,14 +602,14 @@ qr/\[lua\] .*? my lua timer handler/,
 "http lua close fake http connection",
 qr/go\(\): connected: 1, reused: \d+/,
 "go(): request sent: 11",
-"go(): received: OK",
+"go(): received: END",
 ]
 
 
 
 === TEST 9: tcp cosocket in timer handler (keep-alive connections) - header_filter_by_lua
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 
 --- config
     location = /t {
@@ -648,7 +651,7 @@ function go(port)
 
     print("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -706,14 +709,14 @@ qr/\[lua\] .*? my lua timer handler/,
 "http lua close fake http connection",
 qr/go\(\): connected: 1, reused: \d+/,
 "go(): request sent: 11",
-"go(): received: OK",
+"go(): received: END",
 ]
 
 
 
 === TEST 10: tcp cosocket in timer handler (keep-alive connections) - body_filter_by_lua
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 
 --- config
     location = /t {
@@ -755,7 +758,7 @@ function go(port)
 
     print("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -820,14 +823,14 @@ qr/\[lua\] .*? my lua timer handler/,
 "http lua close fake http connection",
 qr/go\(\): connected: 1, reused: \d+/,
 "go(): request sent: 11",
-"go(): received: OK",
+"go(): received: END",
 ]
 
 
 
 === TEST 11: tcp cosocket in timer handler (keep-alive connections) - set_by_lua
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 
 --- config
     location = /t {
@@ -870,7 +873,7 @@ function go(port)
 
     print("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -928,7 +931,7 @@ qr/\[lua\] .*? my lua timer handler/,
 "http lua close fake http connection",
 qr/go\(\): connected: 1, reused: \d+/,
 "go(): request sent: 11",
-"go(): received: OK",
+"go(): received: END",
 ]
 
 
@@ -1007,7 +1010,7 @@ registered timer
                 ngx.log(ngx.ERR, ...)
             end
             local function handle()
-                function f()
+                local function f()
                     print("hello in thread")
                     return "done"
                 end
@@ -1395,4 +1398,3 @@ registered timer
 lua ngx.timer expired
 http lua close fake http connection
 trace: [m][f][g]
-

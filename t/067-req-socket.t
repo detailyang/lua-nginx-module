@@ -1,10 +1,20 @@
 # vim:set ft= ts=4 sw=4 et fdm=marker:
 
-use Test::Nginx::Socket::Lua;
+our $SkipReason;
+
+BEGIN {
+    if ($ENV{TEST_NGINX_USE_HTTP3}) {
+        $SkipReason = "http3 does not support ngx.req.socket";
+    } elsif ($ENV{TEST_NGINX_USE_HTTP2}) {
+        $SkipReason = "http2 does not support ngx.req.socket";
+    }
+}
+
+use Test::Nginx::Socket::Lua $SkipReason ? (skip_all => $SkipReason) : ();
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 3 + 9);
+plan tests => repeat_each() * (blocks() * 3 + 11);
 
 our $HtmlDir = html_dir;
 
@@ -320,7 +330,7 @@ found the end of the stream
 
 === TEST 4: attempt to use the req socket across request boundary
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 --- config
     location /t {
         content_by_lua '
@@ -369,7 +379,7 @@ hello world
 === TEST 5: receive until on request_body - receiveuntil(1) on the last byte of the body
 See https://groups.google.com/group/openresty/browse_thread/thread/43cf01da3c681aba for details
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 --- config
     location /t {
         content_by_lua '
@@ -431,7 +441,7 @@ done
 
 === TEST 6: pipelined POST requests
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 --- config
     location /t {
         content_by_lua '
@@ -519,6 +529,7 @@ Expect: 100-Continue
 \breceived: hello\b.*?\breceived:  worl\b
 --- no_error_log
 [error]
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -1097,3 +1108,166 @@ done
 lua finalize socket
 GC cycle done
 
+
+
+=== TEST 18: receiveany
+--- config
+    location = /t {
+        content_by_lua_block {
+            local sock = ngx.socket.tcp()
+            local ok, err = sock:connect("127.0.0.1", ngx.var.server_port)
+            if not ok then
+                ngx.say("failed to connect: ", err)
+                return
+            end
+
+            local bytes, err = sock:send("POST /back HTTP/1.0\r\nHost: localhost\r\nContent-Length: 1024\r\n\r\nabc")
+            if not bytes then
+                ngx.say("failed to send: ", err)
+            end
+
+            ngx.sleep(0.2)
+
+            local bytes, err = sock:send("hello world\n")
+            if not bytes then
+                ngx.say("failed to send: ", err)
+            end
+
+            local reader = sock:receiveuntil("\r\n\r\n")
+            local header, err = reader()
+            if not header then
+                ngx.say("failed to receive header: ", err)
+                return
+            end
+
+            local line, err = sock:receive()
+            if not line then
+                ngx.say("failed to receive line: ", err)
+                return
+            end
+            ngx.say("received: ", line)
+        }
+    }
+
+    location = /back {
+        content_by_lua_block {
+            ngx.send_headers()
+            ngx.flush(true)
+
+            local sock, err = ngx.req.socket()
+
+            if not sock then
+               ngx.say("failed to get socket: ", err)
+               return nil
+            end
+
+            local data, err = sock:receiveany(4096)
+            if not data then
+               ngx.say("err: ", err)
+               return nil
+            end
+
+            ngx.say("received: ", data)
+        }
+    }
+
+--- request
+GET /t
+--- response_body
+received: received: abc
+--- no_error_log
+[error]
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} ne "")
+
+
+
+=== TEST 19: getfd
+--- http_config
+    lua_package_path "../lua-resty-core/lib/?.lua;;";
+--- config
+    location /t {
+        content_by_lua_block {
+            local sock, err = ngx.req.socket()
+            if sock then
+                ngx.say("got the request socket")
+            else
+                ngx.say("failed to get the request socket: ", err)
+            end
+
+            ngx.say(sock:getfd())
+        }
+    }
+--- request
+POST /t
+hello world
+--- response_body eval
+qr/\Agot the request socket
+\d+
+\z/ms
+--- no_error_log
+[error]
+
+
+
+=== TEST 20: receiveuntil compiled-pattern GC after aborted multipart body (GH #2503)
+--- config
+    location = /t {
+        content_by_lua_block {
+            local sock = ngx.socket.tcp()
+            local ok, err = sock:connect("127.0.0.1", ngx.var.server_port)
+            if not ok then
+                ngx.say("connect failed: ", err)
+                return
+            end
+            local req = "POST /upload HTTP/1.1\r\n"
+                     .. "Host: 127.0.0.1\r\n"
+                     .. "Content-Type: multipart/form-data; "
+                     .. "boundary=----------GFioQpMK0vv2\r\n"
+                     .. "Content-Length: 1048576\r\n"
+                     .. "Connection: close\r\n\r\n"
+                     .. "------"
+            local bytes, err = sock:send(req)
+            if not bytes then
+                ngx.say("send failed: ", err)
+                return
+            end
+            ngx.sleep(0.2)
+            sock:close()
+            ngx.sleep(0.5)
+            ngx.say("ok")
+        }
+    }
+
+    location = /upload {
+        content_by_lua_block {
+            local BOUNDARY = "----------GFioQpMK0vv2"
+            local sock, err = ngx.req.socket()
+            if not sock then
+                ngx.log(ngx.ERR, "no req socket: ", err)
+                return
+            end
+            sock:settimeout(2000)
+            local iter = sock:receiveuntil("--" .. BOUNDARY)
+            while true do
+                local data, e = iter(1)
+                if not data then
+                    ngx.log(ngx.WARN, "iter err: ", e)
+                    break
+                end
+            end
+            iter = nil
+            collectgarbage("collect")
+            collectgarbage("collect")
+            ngx.log(ngx.WARN, "receiveuntil gc done, no crash")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- error_log
+receiveuntil gc done, no crash
+--- no_error_log
+[alert]
+[emerg]
+--- skip_eval: 5:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} ne "")

@@ -13,12 +13,9 @@
 #include "ngx_http_lua_exception.h"
 #include "ngx_http_lua_util.h"
 #include "ngx_http_lua_pcrefix.h"
-#include "ngx_http_lua_time.h"
 #include "ngx_http_lua_log.h"
-#include "ngx_http_lua_regex.h"
 #include "ngx_http_lua_cache.h"
 #include "ngx_http_lua_headers.h"
-#include "ngx_http_lua_variable.h"
 #include "ngx_http_lua_string.h"
 #include "ngx_http_lua_misc.h"
 #include "ngx_http_lua_consts.h"
@@ -42,9 +39,9 @@ static ngx_http_output_header_filter_pt ngx_http_next_header_filter;
 static void
 ngx_http_lua_header_filter_by_lua_env(lua_State *L, ngx_http_request_t *r)
 {
-    /*  set nginx request pointer to current lua thread's globals table */
     ngx_http_lua_set_req(L, r);
 
+#ifndef OPENRESTY_LUAJIT
     /**
      * we want to create empty environment for current script
      *
@@ -68,6 +65,7 @@ ngx_http_lua_header_filter_by_lua_env(lua_State *L, ngx_http_request_t *r)
     /*  }}} */
 
     lua_setfenv(L, -2);    /*  set new running env for the code closure */
+#endif /* OPENRESTY_LUAJIT */
 }
 
 
@@ -167,12 +165,18 @@ ngx_http_lua_header_filter_inline(ngx_http_request_t *r)
 
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
+    if (!llcf->enable_code_cache) {
+        llcf->header_filter_src_ref = LUA_REFNIL;
+    }
+
     /*  load Lua inline script (w/ cache) sp = 1 */
     rc = ngx_http_lua_cache_loadbuffer(r->connection->log, L,
                                        llcf->header_filter_src.value.data,
                                        llcf->header_filter_src.value.len,
+                                       &llcf->header_filter_src_ref,
                                        llcf->header_filter_src_key,
-                                       "=header_filter_by_lua");
+                                       (const char *)
+                                       llcf->header_filter_chunkname);
     if (rc != NGX_OK) {
         return NGX_ERROR;
     }
@@ -210,8 +214,13 @@ ngx_http_lua_header_filter_file(ngx_http_request_t *r)
 
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
+    if (!llcf->enable_code_cache) {
+        llcf->header_filter_src_ref = LUA_REFNIL;
+    }
+
     /*  load Lua script file (w/ cache)        sp = 1 */
     rc = ngx_http_lua_cache_loadfile(r->connection->log, L, script_path,
+                                     &llcf->header_filter_src_ref,
                                      llcf->header_filter_src_key);
     if (rc != NGX_OK) {
         return NGX_ERROR;
@@ -230,8 +239,8 @@ ngx_http_lua_header_filter(ngx_http_request_t *r)
     ngx_http_lua_loc_conf_t     *llcf;
     ngx_http_lua_ctx_t          *ctx;
     ngx_int_t                    rc;
-    ngx_http_cleanup_t          *cln;
-    uint16_t                     old_context;
+    ngx_pool_cleanup_t          *cln;
+    uint32_t                     old_context;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua header filter for user lua code, uri \"%V\"", &r->uri);
@@ -259,7 +268,7 @@ ngx_http_lua_header_filter(ngx_http_request_t *r)
     }
 
     if (ctx->cleanup == NULL) {
-        cln = ngx_http_cleanup_add(r, 0);
+        cln = ngx_pool_cleanup_add(r->pool, 0);
         if (cln == NULL) {
             return NGX_ERROR;
         }

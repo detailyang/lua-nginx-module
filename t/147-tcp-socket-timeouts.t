@@ -17,6 +17,7 @@ BEGIN {
     }
 
     $ENV{TEST_NGINX_EVENT_TYPE} = 'poll';
+    delete($ENV{TEST_NGINX_USE_HTTP2});
     $ENV{MOCKEAGAIN_WRITE_TIMEOUT_PATTERN} = 'slowdata';
 }
 
@@ -323,7 +324,7 @@ lua tcp socket write timed out
 
             sock:settimeouts(100, 100, 100)
 
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             ngx.say("connect: ", ok, " ", err)
 
             local bytes
@@ -346,7 +347,7 @@ send: nil closed
 receive: nil closed
 close: nil closed
 --- error_log
-lua tcp socket connect timed out
+lua tcp socket connect timed out, upstream: 127.0.0.2:12345(127.0.0.2)
 --- timeout: 10
 
 
@@ -411,7 +412,7 @@ lua tcp socket connect timed out
 
             local chunk = 4
 
-            function read()
+            local function read()
                 sock:settimeout(200) -- read: 200 ms
 
                 local data, err = sock:receive(content_length)
@@ -506,7 +507,7 @@ failed to receive data: timeout
 
             local chunk = 4
 
-            function read()
+            local function read()
                 local data, err = sock:receive(content_length)
                 if not data then
                     ngx.log(ngx.ERR, "failed to receive data: ", err)
@@ -530,5 +531,98 @@ GET /t
 --- response_body
 received: ok
 failed to receive a line: closed []
+--- no_error_log
+[error]
+
+
+
+=== TEST 8: connection timeout overflow detection
+--- config
+    location /t {
+        content_by_lua_block {
+            local sock = ngx.socket.tcp()
+            local ok, err = pcall(sock.settimeouts, sock,
+                                  (2 ^ 31) - 1, 500, 500)
+            if not ok then
+                ngx.say("failed to set timeouts: ", err)
+            else
+                ngx.say("settimeouts: ok")
+            end
+
+            ok, err = pcall(sock.settimeouts, sock, 2 ^ 31, 500, 500)
+            if not ok then
+                ngx.say("failed to set timeouts: ", err)
+            else
+                ngx.say("settimeouts: ok")
+            end
+        }
+    }
+--- request
+GET /t
+--- response_body_like
+settimeouts: ok
+failed to set timeouts: bad timeout value
+--- no_error_log
+[error]
+
+
+
+=== TEST 9: send timeout overflow detection
+--- config
+    location /t {
+        content_by_lua_block {
+            local sock = ngx.socket.tcp()
+            local ok, err = pcall(sock.settimeouts, sock,
+                                  500, (2 ^ 31) - 1, 500)
+            if not ok then
+                ngx.say("failed to set timeouts: ", err)
+            else
+                ngx.say("settimeouts: ok")
+            end
+
+            ok, err = pcall(sock.settimeouts, sock, 500, 2 ^ 31, 500)
+            if not ok then
+                ngx.say("failed to set timeouts: ", err)
+            else
+                ngx.say("settimeouts: ok")
+            end
+        }
+    }
+--- request
+GET /t
+--- response_body_like
+settimeouts: ok
+failed to set timeouts: bad timeout value
+--- no_error_log
+[error]
+
+
+
+=== TEST 10: read timeout overflow detection
+--- config
+    location /t {
+        content_by_lua_block {
+            local sock = ngx.socket.tcp()
+            local ok, err = pcall(sock.settimeouts, sock,
+                                  500, 500, (2 ^ 31) - 1)
+            if not ok then
+                ngx.say("failed to set timeouts: ", err)
+            else
+                ngx.say("settimeouts: ok")
+            end
+
+            ok, err = pcall(sock.settimeouts, sock, 500, 500, 2 ^ 31)
+            if not ok then
+                ngx.say("failed to set timeouts: ", err)
+            else
+                ngx.say("settimeouts: ok")
+            end
+        }
+    }
+--- request
+GET /t
+--- response_body_like
+settimeouts: ok
+failed to set timeouts: bad timeout value
 --- no_error_log
 [error]

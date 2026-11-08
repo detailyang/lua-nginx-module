@@ -1,5 +1,14 @@
 # vim:set ft= ts=4 sw=4 et fdm=marker:
-use Test::Nginx::Socket::Lua;
+
+our $SkipReason;
+
+BEGIN {
+    if ($ENV{TEST_NGINX_USE_HTTP3}) {
+        $SkipReason = "http3 does not support ngx.req.raw_header()";
+    }
+}
+
+use Test::Nginx::Socket::Lua $SkipReason ? (skip_all => $SkipReason) : ();
 
 #worker_connections(1014);
 #master_on();
@@ -8,7 +17,7 @@ use Test::Nginx::Socket::Lua;
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 3 + 15);
+plan tests => repeat_each() * (blocks() * 3 + 19);
 
 #no_diff();
 no_long_string();
@@ -331,6 +340,8 @@ Foo: bar baz\r
 }
 --- no_error_log
 [error]
+--- skip_nginx
+3: >= 1.21.1
 
 
 
@@ -362,6 +373,8 @@ Connection: close\r
 --- no_error_log
 [error]
 --- timeout: 5
+--- skip_nginx
+3: >= 1.21.1
 
 
 
@@ -877,3 +890,200 @@ Foo: bar\r
 [error]
 --- timeout: 5
 
+
+
+=== TEST 30: large headers (using single LF as line break)
+--- config
+    location /t {
+        content_by_lua_block {
+            ngx.print(ngx.req.raw_header())
+        }
+    }
+
+--- raw_request eval
+"GET /t HTTP/1.1
+Host: localhost
+Connection: close
+".
+(CORE::join "\n", map { "Header$_: value-$_" } 1..512) . "\n\n"
+
+--- response_body eval
+qq{GET /t HTTP/1.1
+Host: localhost
+Connection: close
+}
+.(CORE::join "\n", map { "Header$_: value-$_" } 1..512) . "\n\n"
+
+--- no_error_log
+[error]
+--- timeout: 5
+
+
+
+=== TEST 31: large headers without request line (using single LF as line break)
+--- config
+    location /t {
+        content_by_lua_block {
+            ngx.print(ngx.req.raw_header(true))
+        }
+    }
+
+--- raw_request eval
+"GET /t HTTP/1.1
+Host: localhost
+Connection: close
+".
+(CORE::join "\n", map { "Header$_: value-$_" } 1..512) . "\n\n"
+
+--- response_body eval
+qq{Host: localhost
+Connection: close
+}
+.(CORE::join "\n", map { "Header$_: value-$_" } 1..512) . "\n\n"
+
+--- no_error_log
+[error]
+--- timeout: 5
+
+
+
+=== TEST 32: large headers with leading CRLF (using single LF as line break)
+--- config
+    location /t {
+        content_by_lua_block {
+            ngx.print(ngx.req.raw_header())
+        }
+    }
+
+--- raw_request eval
+"\r
+GET /t HTTP/1.1
+Host: localhost
+Connection: close
+".
+(CORE::join "\n", map { "Header$_: value-$_" } 1..512) . "\n\n"
+
+--- response_body eval
+qq{GET /t HTTP/1.1
+Host: localhost
+Connection: close
+}
+.(CORE::join "\n", map { "Header$_: value-$_" } 1..512) . "\n\n"
+
+--- no_error_log
+[error]
+--- timeout: 5
+
+
+
+=== TEST 33: large headers without request line but contains leading CRLF (using single LF as line break)
+--- config
+    location /t {
+        content_by_lua_block {
+            ngx.print(ngx.req.raw_header(true))
+        }
+    }
+
+--- raw_request eval
+"\r
+GET /t HTTP/1.1
+Host: localhost
+Connection: close
+".
+(CORE::join "\n", map { "Header$_: value-$_" } 1..512) . "\n\n"
+
+--- response_body eval
+qq{Host: localhost
+Connection: close
+}
+.(CORE::join "\n", map { "Header$_: value-$_" } 1..512) . "\n\n"
+
+--- no_error_log
+[error]
+--- timeout: 5
+
+
+
+=== TEST 34: multi-line header is invalid (nginx >= 1.21.1)
+--- config
+    location /t {
+        content_by_lua '
+            ngx.print(ngx.req.raw_header())
+        ';
+    }
+--- raw_request eval
+"GET /t HTTP/1.1\r
+Host: localhost\r
+Connection: close\r
+Foo: bar baz\r
+  blah\r
+\r
+"
+--- error_code: 400
+--- error_log
+client sent invalid header line: "\x20..." while reading client request headers
+--- no_error_log
+[error]
+--- skip_nginx
+3: < 1.21.1
+
+
+
+=== TEST 35: bugfix: invalid http request
+--- log_level: error
+--- http_config
+    lua_package_path "../lua-resty-core/lib/?.lua;;";
+--- config
+    location /t {
+        content_by_lua_block {
+            local sock = ngx.socket.tcp()
+            local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_SERVER_PORT)
+            if not ok then
+                ngx.log(ngx.ERR, "failed to connect to memc: ", err)
+                return
+            end
+            sock:send("\n")
+            sock:close()
+
+            ngx.say("OK")
+        }
+    }
+
+    log_by_lua_block {
+        local h = ngx.req.raw_header()
+    }
+
+--- request
+GET /t
+--- response_body
+OK
+--- no_error_log
+[error]
+
+
+
+=== TEST 36: works in log_by_lua
+--- config
+    location /t {
+        content_by_lua_block {
+            ngx.say("OK")
+        }
+
+        log_by_lua_block {
+            ngx.log(ngx.WARN, "http_version: ", ngx.req.http_version())
+            ngx.log(ngx.WARN, "raw header: ", ngx.req.raw_header())
+        }
+    }
+--- request
+GET /t
+--- more_headers
+Foo: bar
+--- ignore_response_body
+--- no_error_log
+[error]
+--- error_log
+http_version: 1.1
+raw header: GET /t HTTP/1.1
+Host: localhost
+Connection: close
+Foo: bar

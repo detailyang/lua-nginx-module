@@ -1,6 +1,7 @@
 # vim:set ft= ts=4 sw=4 et fdm=marker:
 
 use Test::Nginx::Socket::Lua;
+use Test::Nginx::Util 'is_tcp_port_used';
 
 #master_on();
 #workers(1);
@@ -11,9 +12,22 @@ use Test::Nginx::Socket::Lua;
 no_root_location;
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 3 + 23);
+plan tests => repeat_each() * (blocks() * 3 + 22);
 
 $ENV{TEST_NGINX_MEMCACHED_PORT} ||= 11211;
+# Isolate keys from other files and concurrent runs of this file.
+$ENV{TEST_NGINX_MEMCACHED_PREFIX} = "lua_nginx_020_subrequest_$$";
+$ENV{TEST_NGINX_HTML_DIR} ||= html_dir();
+
+# NB: tcp_listen_port needs to be greater than 10000,
+# because the test cases expect it to be a 5-digit number
+my $tcp_listen_port = 19113;
+while (++$tcp_listen_port < 65535) {
+    if (!is_tcp_port_used $tcp_listen_port) {
+        last;
+    }
+}
+$ENV{TEST_NGINX_TCP_LISTEN_PORT} = $tcp_listen_port;
 
 #no_diff();
 no_long_string();
@@ -32,7 +46,7 @@ __DATA__
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_DELETE });
 
             ngx.print(res.body)
@@ -62,7 +76,7 @@ lua http subrequest "/other?"
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_DELETE });
 
             ngx.print(res.body)
@@ -90,7 +104,7 @@ DELETE
 
     location /t {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_POST });
 
             ngx.print(res.body)
@@ -114,7 +128,7 @@ POST
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_HEAD });
 
             ngx.print(res.body)
@@ -141,7 +155,7 @@ GET /lua
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_GET });
 
             ngx.print(res.body)
@@ -169,7 +183,7 @@ GET
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo")
+            local res = ngx.location.capture("/foo")
 
             ngx.print(res.body)
         ';
@@ -196,7 +210,7 @@ GET
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo", {})
+            local res = ngx.location.capture("/foo", {})
 
             ngx.print(res.body)
         ';
@@ -210,7 +224,7 @@ GET
 
 
 
-=== TEST 8: PUT (nobody, proxy method)
+=== TEST 8: PUT (with body, proxy method)
 --- config
     location /other {
         default_type 'foo/bar';
@@ -226,7 +240,7 @@ GET
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_PUT, body = "hello" });
 
             ngx.print(res.body)
@@ -242,7 +256,7 @@ hello
 
 
 
-=== TEST 9: PUT (nobody, no proxy method)
+=== TEST 9: PUT (with body, no proxy method)
 --- config
     location /other {
         default_type 'foo/bar';
@@ -255,7 +269,7 @@ hello
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_PUT, body = "hello" });
 
             ngx.print(res.body)
@@ -271,7 +285,7 @@ hello
 
 
 
-=== TEST 10: PUT (nobody, no proxy method)
+=== TEST 10: PUT (no body, no proxy method)
 --- config
     location /other {
         default_type 'foo/bar';
@@ -291,7 +305,7 @@ hello
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_PUT, body = "hello" });
 
             ngx.print(res.body)
@@ -329,7 +343,7 @@ GET
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_POST, body = "hello" });
 
             ngx.print(res.body)
@@ -347,22 +361,23 @@ hello
 
 === TEST 12: POST (with body, memc method)
 --- config
-    location /flush {
-        set $memc_cmd flush_all;
+    location /delete {
+        set $memc_cmd delete;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:12:/memc";
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /memc {
-        set $memc_key $echo_request_uri;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:12:$echo_request_uri";
         set $memc_exptime 600;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /lua {
         content_by_lua '
-            ngx.location.capture("/flush");
+            ngx.location.capture("/delete");
 
-            res = ngx.location.capture("/memc");
+            local res = ngx.location.capture("/memc");
             ngx.say("GET: " .. res.status);
 
             res = ngx.location.capture("/memc",
@@ -387,24 +402,25 @@ cached: hello
 
 === TEST 13: POST (with body, memc method)
 --- config
-    location /flush {
-        set $memc_cmd flush_all;
+    location /delete {
+        set $memc_cmd delete;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:13:/memc";
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /memc {
         set $memc_cmd "";
-        set $memc_key $echo_request_uri;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:13:$echo_request_uri";
         set $memc_exptime 600;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /lua {
         content_by_lua '
-            ngx.location.capture("/flush",
+            ngx.location.capture("/delete",
                 { share_all_vars = true });
 
-            res = ngx.location.capture("/memc",
+            local res = ngx.location.capture("/memc",
                 { share_all_vars = true });
             ngx.say("GET: " .. res.status);
 
@@ -435,7 +451,7 @@ cached: hello
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = {} })
             ngx.print(res.body)
         ';
@@ -456,7 +472,7 @@ GET /lua
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = { ["fo="] = "=>" } })
             ngx.print(res.body)
         ';
@@ -478,7 +494,7 @@ fo%3D=%3D%3E
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = { ["fo="] = "=>",
                     ["="] = ":" } })
             ngx.print(res.body)
@@ -503,7 +519,7 @@ GET /lua
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = { foo = 3,
                     bar = "hello" } })
             ngx.print(res.body)
@@ -526,7 +542,7 @@ GET /lua
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = { [57] = "hi" } })
             ngx.print(res.body)
         ';
@@ -548,7 +564,7 @@ attempt to use a non-string key in the "args" option table
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = { "hi" } })
             ngx.print(res.body)
         ';
@@ -570,7 +586,7 @@ attempt to use a non-string key in the "args" option table
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo?a=3",
+            local res = ngx.location.capture("/foo?a=3",
                 { args = { b = 4 } })
             ngx.print(res.body)
         ';
@@ -592,7 +608,7 @@ a=3&b=4
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo?a=3",
+            local res = ngx.location.capture("/foo?a=3",
                 { args = "b=4" })
             ngx.print(res.body)
         ';
@@ -685,7 +701,7 @@ https://github.com/chaoslawful/lua-nginx-module/issues/38
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_GET });
             ngx.say("header foo: [", res.body, "]")
         ';
@@ -711,7 +727,7 @@ https://github.com/chaoslawful/lua-nginx-module/issues/38
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { body = "abc" });
             ngx.say("header foo: [", res.body, "]")
         ';
@@ -746,8 +762,8 @@ header foo: [bar]
     }
     location /main {
         content_by_lua '
-            res1, res2 = ngx.location.capture_multi({{"/a"}, {"/b"}})
-            res3 = ngx.location.capture("/c")
+            local res1, res2 = ngx.location.capture_multi({{"/a"}, {"/b"}})
+            local res3 = ngx.location.capture("/c")
             ngx.print(res1.body, res2.body, res3.body)
         ';
     }
@@ -780,7 +796,7 @@ lua reuse free buf memory
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_POST, body = "hello" });
 
             ngx.print(res.body)
@@ -801,7 +817,7 @@ hello
 --- config
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo.html")
+            local res = ngx.location.capture("/foo.html")
 
             ngx.say(res.status)
             ngx.say(res.header["Last-Modified"])
@@ -832,7 +848,7 @@ hello, static file$
     location /lua {
         content_by_lua '
             local ctx = {}
-            res = ngx.location.capture("/sub", { ctx = ctx })
+            local res = ngx.location.capture("/sub", { ctx = ctx })
 
             ngx.say(ctx.foo);
             ngx.say(ngx.ctx.foo);
@@ -857,7 +873,7 @@ nil
     }
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/sub", { ctx = ngx.ctx })
+            local res = ngx.location.capture("/sub", { ctx = ngx.ctx })
             ngx.say(ngx.ctx.foo);
         ';
     }
@@ -878,14 +894,14 @@ bar
     }
 --- config
     location /memc {
-        set $memc_key some_key;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:32:some_key";
         set $memc_exptime 600;
         memc_pass memc;
     }
 
     location /t {
         content_by_lua '
-            res = ngx.location.capture("/memc",
+            local res = ngx.location.capture("/memc",
                 { method = ngx.HTTP_PUT, body = "hello 1234" });
             -- ngx.say("PUT: " .. res.status);
 
@@ -922,7 +938,7 @@ lua reuse free buf chain, but reallocate memory because
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_GET });
 
             ngx.print(res.body)
@@ -959,7 +975,7 @@ nil
         content_by_lua '
             ngx.req.read_body()
 
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_GET });
 
             ngx.print(res.body)
@@ -996,7 +1012,7 @@ nil
         content_by_lua '
             ngx.req.read_body()
 
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_POST });
 
             ngx.print(res.body)
@@ -1033,7 +1049,7 @@ hello, world
         content_by_lua '
             ngx.req.read_body()
 
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_PUT });
 
             ngx.print(res.body)
@@ -1074,7 +1090,7 @@ lua subrequests cycle while processing "/t"
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_OPTIONS });
 
             ngx.print(res.body)
@@ -1099,7 +1115,7 @@ OPTIONS
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_OPTIONS, body = "hello world" });
 
             ngx.print(res.body)
@@ -1119,7 +1135,11 @@ hello world
 --- config
     location /t {
         content_by_lua '
-            local args = ngx.req.get_uri_args()
+            local args, err = ngx.req.get_uri_args()
+            if err then
+                ngx.say("err: ", err)
+            end
+
             local res = ngx.location.capture("/sub", { args = args })
             ngx.print(res.body)
         ';
@@ -1147,7 +1167,7 @@ r%5B%5D=http%3A%2F%2Fajax.googleapis.com%3A80%2Fajax%2Flibs%2Fjquery%2F1.7.2%2Fj
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/sub")
+            local res = ngx.location.capture("/sub")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
         ';
@@ -1168,7 +1188,7 @@ body:
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/sub")
+            local res = ngx.location.capture("/sub")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
         ';
@@ -1182,6 +1202,7 @@ body:
 
 
 === TEST 43: subrequests with an output body filter returning NGX_ERROR
+--- no_http2
 --- config
     location /sub {
         echo hello world;
@@ -1192,7 +1213,7 @@ body:
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/sub")
+            local res = ngx.location.capture("/sub")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
         ';
@@ -1222,6 +1243,8 @@ F(ngx_http_finalize_request) {
 --- error_code
 --- no_error_log
 [error]
+--- curl_error eval
+qr{(\Qcurl: (52) Empty reply from server\E|\Qcurl: (95) HTTP/3 stream 0 reset by server\E)}ms
 
 
 
@@ -1233,12 +1256,12 @@ F(ngx_http_finalize_request) {
 
         set $memc_key 'foo';
         #set $memc_exptime 300;
-        memc_pass 127.0.0.1:19112; #$TEST_NGINX_MEMCACHED_PORT;
+        memc_pass 127.0.0.1:$TEST_NGINX_RAND_PORT_1; #$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/memc")
+            local res = ngx.location.capture("/memc")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -1246,7 +1269,7 @@ F(ngx_http_finalize_request) {
     }
 --- request
 GET /main
---- tcp_listen: 19112
+--- tcp_listen: $TEST_NGINX_RAND_PORT_1
 --- tcp_query_len: 9
 --- tcp_reply eval
 "VALUE foo 0 1024\r\nhello world"
@@ -1303,12 +1326,12 @@ upstream prematurely closed connection
 
         set $memc_key 'foo';
         #set $memc_exptime 300;
-        memc_pass 127.0.0.1:19112; #$TEST_NGINX_MEMCACHED_PORT;
+        memc_pass 127.0.0.1:$TEST_NGINX_RAND_PORT_1; #$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/memc")
+            local res = ngx.location.capture("/memc")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -1316,7 +1339,7 @@ upstream prematurely closed connection
     }
 --- request
 GET /main
---- tcp_listen: 19112
+--- tcp_listen: $TEST_NGINX_RAND_PORT_1
 --- tcp_no_close
 --- tcp_reply eval
 "VALUE foo 0 1024\r\nhello world"
@@ -1376,12 +1399,14 @@ upstream timed out
 
         #proxy_read_timeout 100ms;
         proxy_buffering on;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
+        proxy_http_version 1.0;
+        proxy_set_header Connection close;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -1389,35 +1414,10 @@ upstream timed out
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_query_len: 65
 --- tcp_reply eval
 "HTTP/1.0 200 OK\r\nContent-Length: 1024\r\n\r\nhello world"
-
---- stap
-F(ngx_http_upstream_finalize_request) {
-    printf("upstream fin req: error=%d eof=%d rc=%d\n",
-        $r->upstream->peer->connection->read->error,
-        $r->upstream->peer->connection->read->eof,
-        $rc)
-    #print_ubacktrace()
-}
-F(ngx_connection_error) {
-    printf("conn err: %d: %s\n", $err, user_string($text))
-    #print_ubacktrace()
-}
-F(ngx_http_lua_post_subrequest) {
-    printf("post subreq: rc=%d, status=%d\n", $rc, $r->headers_out->status)
-    #print_ubacktrace()
-}
-/*
-F(ngx_http_finalize_request) {
-    printf("finalize: %d\n", $rc)
-}
-*/
---- stap_out
-upstream fin req: error=0 eof=1 rc=502
-post subreq: rc=0, status=200
 
 --- response_body
 status: 200
@@ -1436,12 +1436,12 @@ upstream prematurely closed connection
 
         proxy_read_timeout 100ms;
         proxy_buffering on;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -1449,7 +1449,7 @@ upstream prematurely closed connection
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_no_close
 --- tcp_reply eval
 "HTTP/1.0 200 OK\r\nContent-Length: 1024\r\n\r\nhello world"
@@ -1498,12 +1498,14 @@ upstream timed out
 
         #proxy_read_timeout 100ms;
         proxy_buffering on;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
+        proxy_http_version 1.0;
+        proxy_set_header Connection close;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -1511,7 +1513,7 @@ upstream timed out
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_query_len: 65
 --- tcp_reply eval
 "HTTP/1.0 200 OK\r\n\r\nhello world"
@@ -1558,12 +1560,12 @@ truncated: false
 
         proxy_read_timeout 100ms;
         proxy_buffering on;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -1571,7 +1573,7 @@ truncated: false
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_no_close
 --- tcp_reply eval
 "HTTP/1.0 200 OK\r\n\r\nhello world"
@@ -1621,12 +1623,13 @@ upstream timed out
 
         #proxy_read_timeout 100ms;
         proxy_buffering off;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
+        proxy_set_header Connection close;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -1634,7 +1637,7 @@ upstream timed out
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_query_len: 65
 --- tcp_reply eval
 "HTTP/1.0 200 OK\r\n\r\nhello world"
@@ -1681,12 +1684,12 @@ truncated: false
 
         proxy_read_timeout 500ms;
         proxy_buffering off;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -1694,7 +1697,7 @@ truncated: false
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_no_close
 --- tcp_reply eval
 "HTTP/1.0 200 OK\r\n\r\nhello world"
@@ -1752,7 +1755,7 @@ upstream timed out
             ngx.req.read_body()
 
             for i = 1, 2 do
-                res = ngx.location.capture("/other",
+                local res = ngx.location.capture("/other",
                     { method = ngx.HTTP_POST });
 
                 ngx.say(res.body)
@@ -1792,7 +1795,7 @@ hello world
             ngx.req.read_body()
 
             for i = 1, 2 do
-                res = ngx.location.capture("/other",
+                local res = ngx.location.capture("/other",
                     { method = ngx.HTTP_POST });
 
                 ngx.say(res.body)
@@ -1832,7 +1835,7 @@ hello world
             ngx.req.read_body()
 
             for i = 1, 2 do
-                res = ngx.location.capture("/other",
+                local res = ngx.location.capture("/other",
                     { method = ngx.HTTP_POST });
 
                 ngx.say(res.body)
@@ -1907,12 +1910,13 @@ a client request body is buffered to a temporary file
         #proxy_read_timeout 100ms;
         proxy_http_version 1.1;
         proxy_buffering on;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
+        proxy_set_header Connection close;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -1920,7 +1924,7 @@ a client request body is buffered to a temporary file
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_query_len: 65
 --- tcp_reply eval
 "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nb\r\nhello world\r"
@@ -1970,12 +1974,13 @@ upstream prematurely closed connection
         #proxy_read_timeout 100ms;
         proxy_http_version 1.1;
         proxy_buffering off;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_set_header Connection close;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -1983,7 +1988,7 @@ upstream prematurely closed connection
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_query_len: 65
 --- tcp_reply eval
 "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nb\r\nhello world\r"
@@ -2031,12 +2036,12 @@ upstream prematurely closed connection
         proxy_read_timeout 100ms;
         proxy_buffering on;
         proxy_http_version 1.1;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -2044,7 +2049,7 @@ upstream prematurely closed connection
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_no_close
 --- tcp_reply eval
 "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nb\r\nhello world\r"
@@ -2093,12 +2098,12 @@ upstream timed out
         #proxy_read_timeout 100ms;
         proxy_buffering on;
         proxy_http_version 1.1;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -2106,7 +2111,7 @@ upstream timed out
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_no_close
 --- tcp_reply eval
 "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
@@ -2151,12 +2156,12 @@ truncated: false
         #proxy_read_timeout 100ms;
         proxy_buffering off;
         proxy_http_version 1.1;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -2164,7 +2169,7 @@ truncated: false
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_no_close
 --- tcp_reply eval
 "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"
@@ -2210,12 +2215,13 @@ truncated: false
 
         #proxy_read_timeout 100ms;
         proxy_buffering off;
-        proxy_pass http://127.0.0.1:19113;
+        proxy_pass http://127.0.0.1:$TEST_NGINX_TCP_LISTEN_PORT;
+        proxy_set_header Connection close;
     }
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/proxy")
+            local res = ngx.location.capture("/proxy")
             ngx.say("status: ", res.status)
             ngx.say("body: ", res.body)
             ngx.say("truncated: ", res.truncated)
@@ -2223,7 +2229,7 @@ truncated: false
     }
 --- request
 GET /main
---- tcp_listen: 19113
+--- tcp_listen: $TEST_NGINX_TCP_LISTEN_PORT
 --- tcp_query_len: 65
 --- tcp_reply eval
 "HTTP/1.0 200 OK\r\nContent-Length: 1024\r\n\r\nhello world"
@@ -2284,7 +2290,7 @@ upstream prematurely closed connection
             }
 
             for i, method in ipairs(methods) do
-                res = ngx.location.capture("/other",
+                local res = ngx.location.capture("/other",
                     { method = method })
                 ngx.print(res.body)
             end
@@ -2320,7 +2326,7 @@ method: TRACE
 
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_DELETE });
 
             ngx.print(res.body)
@@ -2333,6 +2339,7 @@ hello world
 nil
 --- no_error_log
 [error]
+--- skip_eval: 3:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -2349,7 +2356,7 @@ nil
     location /lua {
         content_by_lua '
             ngx.req.read_body()
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_DELETE, always_forward_body = true });
 
             ngx.print(res.body)
@@ -2378,7 +2385,7 @@ hello world
     location /lua {
         content_by_lua '
             ngx.req.read_body()
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_DELETE, always_forward_body = true });
 
             ngx.print(res.body)
@@ -2406,7 +2413,7 @@ hello world
 --- config
     location = /t {
         content_by_lua '
-            res = ngx.location.capture("/sub")
+            local res = ngx.location.capture("/sub")
             ngx.print(res.body)
         ';
     }
@@ -2599,7 +2606,7 @@ qr/Assertion .*? failed/
 
     location = /t {
         content_by_lua '
-            res = ngx.location.capture("/sub")
+            local res = ngx.location.capture("/sub")
             ngx.print(res.body)
             ngx.say("pr: User-Agent: ", ngx.var.http_user_agent)
             ngx.say("pr: Host: ", ngx.var.http_host)
@@ -2617,6 +2624,7 @@ pr: Host: localhost
 
 --- no_error_log
 [error]
+--- skip_eval: 3:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -2632,7 +2640,7 @@ pr: Host: localhost
 
     location = /t {
         content_by_lua '
-            res = ngx.location.capture("/sub")
+            local res = ngx.location.capture("/sub")
             ngx.print(res.body)
             ngx.say("pr: User-Agent: ", ngx.var.http_user_agent)
             ngx.say("pr: Host: ", ngx.var.http_host)
@@ -2650,6 +2658,7 @@ pr: Host: localhost
 
 --- no_error_log
 [error]
+--- skip_eval: 3:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -2665,7 +2674,7 @@ pr: Host: localhost
 
     location = /t {
         content_by_lua '
-            res = ngx.location.capture("/sub")
+            local res = ngx.location.capture("/sub")
             ngx.print(res.body)
             ngx.say("pr: User-Agent: ", ngx.var.http_user_agent)
             ngx.say("pr: Host: ", ngx.var.http_host)
@@ -2695,7 +2704,7 @@ pr: Host: localhost
 
     location = /t {
         content_by_lua '
-            res = ngx.location.capture("/sub")
+            local res = ngx.location.capture("/sub")
             ngx.print(res.body)
             ngx.say("pr: Cookie: ", ngx.var.http_cookie)
         ';
@@ -2723,7 +2732,7 @@ pr: Cookie: foo; bar
 
     location = /t {
         content_by_lua '
-            res = ngx.location.capture("/sub")
+            local res = ngx.location.capture("/sub")
             ngx.print(res.body)
             ngx.say("pr: Cookie: ", ngx.var.http_cookie)
         ';
@@ -2746,7 +2755,7 @@ pr: Cookie: foo; bar
 --- config
     location /lua {
         content_by_lua '
-            res = ngx.location.capture("/index.html",
+            local res = ngx.location.capture("/index.html",
                 { method = ngx.HTTP_HEAD });
             ngx.say("content-length: ", res.header["Content-Length"])
             ngx.say("body: [", res.body, "]")
@@ -2873,3 +2882,726 @@ DELETE /file.txt, response status: 204
 --- no_error_log
 [error]
 --- error_code: 200
+
+
+
+=== TEST 77: avoid request smuggling 1/4 (default capture + smuggle in header)
+--- http_config
+    upstream backend {
+        server unix:$TEST_NGINX_HTML_DIR/nginx.sock;
+        keepalive 32;
+    }
+
+    server {
+        listen unix:$TEST_NGINX_HTML_DIR/nginx.sock;
+
+        location / {
+            content_by_lua_block {
+                ngx.say("method: ", ngx.var.request_method,
+                        ", uri: ", ngx.var.uri,
+                        ", X: ", ngx.var.http_x)
+            }
+        }
+    }
+--- config
+    location /proxy {
+        proxy_http_version 1.1;
+        proxy_set_header   Connection "";
+        proxy_pass         http://backend/foo;
+    }
+
+    location /capture {
+        server_tokens off;
+        more_clear_headers Date;
+
+        content_by_lua_block {
+            local res = ngx.location.capture("/proxy")
+            ngx.print(res.body)
+        }
+    }
+
+    location /t {
+        content_by_lua_block {
+            local req = [[
+GET /capture HTTP/1.1
+Host: test.com
+Content-Length: 37
+Transfer-Encoding: chunked
+
+0
+
+GET /capture HTTP/1.1
+Host: test.com
+X: GET /bar HTTP/1.0
+
+]]
+
+            local sock = ngx.socket.tcp()
+            sock:settimeout(1000)
+
+            local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_SERVER_PORT)
+            if not ok then
+                ngx.say("failed to connect: ", err)
+                return
+            end
+
+            local bytes, err = sock:send(req)
+            if not bytes then
+                ngx.say("failed to send req: ", err)
+                return
+            end
+
+            ngx.say("req bytes: ", bytes)
+
+            local n_resp = 0
+
+            local reader = sock:receiveuntil("\r\n")
+            while true do
+                local line, err = reader()
+                if line then
+                    ngx.say(line)
+                    if line == "0" then
+                        n_resp = n_resp + 1
+                    end
+
+                    if n_resp >= 2 then
+                        break
+                    end
+
+                else
+                    ngx.say("err: ", err)
+                    break
+                end
+            end
+
+            sock:close()
+        }
+    }
+--- request
+GET /t
+--- response_body
+req bytes: 146
+HTTP/1.1 200 OK
+Server: nginx
+Content-Type: text/plain
+Transfer-Encoding: chunked
+Connection: keep-alive
+
+1f
+method: GET, uri: /foo, X: nil
+
+0
+
+HTTP/1.1 200 OK
+Server: nginx
+Content-Type: text/plain
+Transfer-Encoding: chunked
+Connection: keep-alive
+
+2d
+method: GET, uri: /foo, X: GET /bar HTTP/1.0
+
+0
+--- no_error_log
+[error]
+--- skip_nginx: 3: >= 1.21.1
+
+
+
+=== TEST 78: avoid request smuggling 2/4 (POST capture + smuggle in body)
+--- http_config
+    upstream backend {
+        server unix:$TEST_NGINX_HTML_DIR/nginx.sock;
+        keepalive 32;
+    }
+
+    server {
+        listen unix:$TEST_NGINX_HTML_DIR/nginx.sock;
+
+        location / {
+            content_by_lua_block {
+                ngx.say("method: ", ngx.var.request_method,
+                        ", uri: ", ngx.var.uri)
+            }
+        }
+    }
+--- config
+    location /proxy {
+        proxy_http_version 1.1;
+        proxy_set_header   Connection "";
+        proxy_pass         http://backend/foo;
+    }
+
+    location /capture {
+        server_tokens off;
+        more_clear_headers Date;
+
+        content_by_lua_block {
+            ngx.req.read_body()
+            local res = ngx.location.capture("/proxy", { method = ngx.HTTP_POST })
+            ngx.print(res.body)
+        }
+    }
+
+    location /t {
+        content_by_lua_block {
+            local req = [[
+GET /capture HTTP/1.1
+Host: test.com
+Content-Length: 57
+Transfer-Encoding: chunked
+
+0
+
+POST /capture HTTP/1.1
+Host: test.com
+Content-Length: 60
+
+POST /bar HTTP/1.1
+Host: test.com
+Content-Length: 5
+
+hello
+
+]]
+
+            local sock = ngx.socket.tcp()
+            sock:settimeout(1000)
+
+            local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_SERVER_PORT)
+            if not ok then
+                ngx.say("failed to connect: ", err)
+                return
+            end
+
+            local bytes, err = sock:send(req)
+            if not bytes then
+                ngx.say("failed to send req: ", err)
+                return
+            end
+
+            ngx.say("req bytes: ", bytes)
+
+            local n_resp = 0
+
+            local reader = sock:receiveuntil("\r\n")
+            while true do
+                local line, err = reader()
+                if line then
+                    ngx.say(line)
+                    if line == "0" then
+                        n_resp = n_resp + 1
+                    end
+
+                    if n_resp >= 2 then
+                        break
+                    end
+
+                else
+                    ngx.say("err: ", err)
+                    break
+                end
+            end
+
+            sock:close()
+        }
+    }
+--- request
+GET /t
+--- response_body
+req bytes: 205
+HTTP/1.1 200 OK
+Server: nginx
+Content-Type: text/plain
+Transfer-Encoding: chunked
+Connection: keep-alive
+
+18
+method: POST, uri: /foo
+
+0
+
+HTTP/1.1 200 OK
+Server: nginx
+Content-Type: text/plain
+Transfer-Encoding: chunked
+Connection: keep-alive
+
+18
+method: POST, uri: /foo
+
+0
+--- no_error_log
+[error]
+--- skip_nginx
+3: >= 1.21.1
+
+
+
+=== TEST 79: avoid request smuggling 3/4 (POST capture w/ always_forward_body + smuggle in body)
+--- http_config
+    upstream backend {
+        server unix:$TEST_NGINX_HTML_DIR/nginx.sock;
+        keepalive 32;
+    }
+
+    server {
+        listen unix:$TEST_NGINX_HTML_DIR/nginx.sock;
+
+        location / {
+            content_by_lua_block {
+                ngx.say("method: ", ngx.var.request_method,
+                        ", uri: ", ngx.var.uri)
+            }
+        }
+    }
+--- config
+    location /proxy {
+        proxy_http_version 1.1;
+        proxy_set_header   Connection "";
+        proxy_pass         http://backend/foo;
+    }
+
+    location /capture {
+        server_tokens off;
+        more_clear_headers Date;
+
+        content_by_lua_block {
+            ngx.req.read_body()
+            local res = ngx.location.capture("/proxy", {
+                method = ngx.HTTP_POST,
+                always_forward_body = true
+            })
+            ngx.print(res.body)
+        }
+    }
+
+    location /t {
+        content_by_lua_block {
+            local req = [[
+GET /capture HTTP/1.1
+Host: test.com
+Content-Length: 57
+Transfer-Encoding: chunked
+
+0
+
+POST /capture HTTP/1.1
+Host: test.com
+Content-Length: 60
+
+POST /bar HTTP/1.1
+Host: test.com
+Content-Length: 5
+
+hello
+
+]]
+
+            local sock = ngx.socket.tcp()
+            sock:settimeout(1000)
+
+            local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_SERVER_PORT)
+            if not ok then
+                ngx.say("failed to connect: ", err)
+                return
+            end
+
+            local bytes, err = sock:send(req)
+            if not bytes then
+                ngx.say("failed to send req: ", err)
+                return
+            end
+
+            ngx.say("req bytes: ", bytes)
+
+            local n_resp = 0
+
+            local reader = sock:receiveuntil("\r\n")
+            while true do
+                local line, err = reader()
+                if line then
+                    ngx.say(line)
+                    if line == "0" then
+                        n_resp = n_resp + 1
+                    end
+
+                    if n_resp >= 2 then
+                        break
+                    end
+
+                else
+                    ngx.say("err: ", err)
+                    break
+                end
+            end
+
+            sock:close()
+        }
+    }
+--- request
+GET /t
+--- response_body
+req bytes: 205
+HTTP/1.1 200 OK
+Server: nginx
+Content-Type: text/plain
+Transfer-Encoding: chunked
+Connection: keep-alive
+
+18
+method: POST, uri: /foo
+
+0
+
+HTTP/1.1 200 OK
+Server: nginx
+Content-Type: text/plain
+Transfer-Encoding: chunked
+Connection: keep-alive
+
+18
+method: POST, uri: /foo
+
+0
+--- no_error_log
+[error]
+--- skip_nginx
+3: >= 1.21.1
+
+
+
+=== TEST 80: avoid request smuggling 4/4 (POST capture w/ body + smuggle in body)
+--- http_config
+    upstream backend {
+        server unix:$TEST_NGINX_HTML_DIR/nginx.sock;
+        keepalive 32;
+    }
+
+    server {
+        listen unix:$TEST_NGINX_HTML_DIR/nginx.sock;
+
+        location / {
+            content_by_lua_block {
+                ngx.say("method: ", ngx.var.request_method,
+                        ", uri: ", ngx.var.uri)
+            }
+        }
+    }
+--- config
+    location /proxy {
+        proxy_http_version 1.1;
+        proxy_set_header   Connection "";
+        proxy_pass         http://backend/foo;
+    }
+
+    location /capture {
+        server_tokens off;
+        more_clear_headers Date;
+
+        content_by_lua_block {
+            ngx.req.read_body()
+            local res = ngx.location.capture("/proxy", {
+                method = ngx.HTTP_POST,
+                always_forward_body = true,
+                body = ngx.req.get_body_data()
+            })
+            ngx.print(res.body)
+        }
+    }
+
+    location /t {
+        content_by_lua_block {
+            local req = [[
+GET /capture HTTP/1.1
+Host: test.com
+Content-Length: 57
+Transfer-Encoding: chunked
+
+0
+
+POST /capture HTTP/1.1
+Host: test.com
+Content-Length: 60
+
+POST /bar HTTP/1.1
+Host: test.com
+Content-Length: 5
+
+hello
+
+]]
+
+            local sock = ngx.socket.tcp()
+            sock:settimeout(1000)
+
+            local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_SERVER_PORT)
+            if not ok then
+                ngx.say("failed to connect: ", err)
+                return
+            end
+
+            local bytes, err = sock:send(req)
+            if not bytes then
+                ngx.say("failed to send req: ", err)
+                return
+            end
+
+            ngx.say("req bytes: ", bytes)
+
+            local n_resp = 0
+
+            local reader = sock:receiveuntil("\r\n")
+            while true do
+                local line, err = reader()
+                if line then
+                    ngx.say(line)
+                    if line == "0" then
+                        n_resp = n_resp + 1
+                    end
+
+                    if n_resp >= 2 then
+                        break
+                    end
+
+                else
+                    ngx.say("err: ", err)
+                    break
+                end
+            end
+
+            sock:close()
+        }
+    }
+--- request
+GET /t
+--- response_body
+req bytes: 205
+HTTP/1.1 200 OK
+Server: nginx
+Content-Type: text/plain
+Transfer-Encoding: chunked
+Connection: keep-alive
+
+18
+method: POST, uri: /foo
+
+0
+
+HTTP/1.1 200 OK
+Server: nginx
+Content-Type: text/plain
+Transfer-Encoding: chunked
+Connection: keep-alive
+
+18
+method: POST, uri: /foo
+
+0
+--- no_error_log
+[error]
+--- skip_nginx
+3: >= 1.21.1
+
+
+
+=== TEST 81: bad HTTP method
+--- config
+    location /other { }
+
+    location /lua {
+        content_by_lua_block {
+            local res = ngx.location.capture("/other",
+                { method = 10240 });
+        }
+    }
+--- request
+GET /lua
+--- response_body_like: 500 Internal Server Error
+--- error_code: 500
+--- error_log
+unsupported HTTP method: 10240
+
+
+
+=== TEST 82: bad requests with both Content-Length and Transfer-Encoding (nginx >= 1.21.1)
+--- http_config
+    upstream backend {
+        server unix:$TEST_NGINX_HTML_DIR/nginx.sock;
+        keepalive 32;
+    }
+
+    server {
+        listen unix:$TEST_NGINX_HTML_DIR/nginx.sock;
+
+        location / {
+            content_by_lua_block {
+                ngx.say("method: ", ngx.var.request_method,
+                        ", uri: ", ngx.var.uri,
+                        ", X: ", ngx.var.http_x)
+            }
+        }
+    }
+--- config
+    location /proxy {
+        proxy_http_version 1.1;
+        proxy_set_header   Connection "";
+        proxy_pass         http://backend/foo;
+    }
+
+    location /capture {
+        server_tokens off;
+        more_clear_headers Date;
+
+        content_by_lua_block {
+            local res = ngx.location.capture("/proxy")
+            ngx.print(res.body)
+        }
+    }
+
+    location /t {
+        content_by_lua_block {
+            local req = [[
+GET /capture HTTP/1.1
+Host: test.com
+Content-Length: 37
+Transfer-Encoding: chunked
+
+0
+
+GET /capture HTTP/1.1
+Host: test.com
+X: GET /bar HTTP/1.0
+
+]]
+
+            local sock = ngx.socket.tcp()
+            sock:settimeout(1000)
+
+            local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_SERVER_PORT)
+            if not ok then
+                ngx.say("failed to connect: ", err)
+                return
+            end
+
+            local bytes, err = sock:send(req)
+            if not bytes then
+                ngx.say("failed to send req: ", err)
+                return
+            end
+
+            ngx.say("req bytes: ", bytes)
+
+            local n_resp = 0
+
+            local reader = sock:receiveuntil("\r\n")
+            while true do
+                local line, err = reader()
+                if line then
+                    ngx.say(line)
+                    if line == "0" then
+                        n_resp = n_resp + 1
+                    end
+
+                    if n_resp >= 2 then
+                        break
+                    end
+
+                else
+                    ngx.say("err: ", err)
+                    break
+                end
+            end
+
+            sock:close()
+        }
+    }
+--- request
+GET /t
+--- response_body_like
+req bytes: 146
+HTTP/1.1 400 Bad Request
+--- no_error_log
+[error]
+--- skip_nginx
+3: < 1.21.1
+
+
+
+=== TEST 83: avoid request smuggling of HEAD req
+--- config
+    location /capture {
+        server_tokens off;
+        more_clear_headers Date;
+
+        content_by_lua_block {
+            ngx.say("Hello")
+        }
+    }
+
+    location /t {
+        content_by_lua_block {
+            local req = [[
+HEAD /capture HTTP/1.1
+Host: test.com
+Content-Length: 63
+
+GET /capture HTTP/1.1
+Host: test.com
+X: GET /bar HTTP/1.0
+
+]]
+
+            local sock = ngx.socket.tcp()
+            sock:settimeout(1000)
+
+            local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_SERVER_PORT)
+            if not ok then
+                ngx.say("failed to connect: ", err)
+                return
+            end
+
+            local bytes, err = sock:send(req)
+            if not bytes then
+                ngx.say("failed to send req: ", err)
+                return
+            end
+
+            ngx.say("req bytes: ", bytes)
+
+            local n_resp = 0
+
+            local reader = sock:receiveuntil("\r\n")
+            while true do
+                local line, err = reader()
+                if line then
+                    ngx.say(line)
+                    if line == "0" then
+                        n_resp = n_resp + 1
+                    end
+
+                    if n_resp >= 2 then
+                        break
+                    end
+
+                else
+                    ngx.say("err: ", err)
+                    break
+                end
+            end
+
+            sock:close()
+        }
+    }
+--- request
+GET /t
+--- response_body
+req bytes: 117
+HTTP/1.1 200 OK
+Server: nginx
+Content-Type: text/plain
+Connection: keep-alive
+
+err: timeout
+--- error_log
+lua tcp socket read timed out

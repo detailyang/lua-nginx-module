@@ -3,6 +3,7 @@
 use Test::Nginx::Socket::Lua;
 
 #repeat_each(20000);
+#repeat_each(200);
 repeat_each(2);
 #master_on();
 #workers(1);
@@ -13,6 +14,8 @@ repeat_each(2);
 plan tests => repeat_each() * (blocks() * 3 + 2);
 
 $ENV{TEST_NGINX_MEMCACHED_PORT} ||= 11211;
+# Isolate keys from other files and concurrent runs of this file.
+$ENV{TEST_NGINX_MEMCACHED_PREFIX} = "lua_nginx_005_exit_$$";
 $ENV{TEST_NGINX_MYSQL_PORT} ||= 3306;
 
 our $LuaCpath = $ENV{LUA_CPATH} ||
@@ -64,7 +67,7 @@ GET /lua
 --- error_log
 attempt to set status 404 via ngx.exit after sending out the response status 200
 --- no_error_log
-alert
+[alert]
 --- response_body
 hi
 
@@ -122,6 +125,8 @@ GET /api?user=agentz
 
 
 === TEST 6: working with ngx_auth_request (simplest form, w/o ngx_memc)
+--- skip_eval: 3:$ENV{TEST_NGINX_USE_HTTP3}
+--- no_http2
 --- http_config eval
 "
     lua_package_cpath '$::LuaCpath';
@@ -135,7 +140,7 @@ GET /api?user=agentz
     location /memc {
         internal;
 
-        set $memc_key $arg_key;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:6:$arg_key";
         set $memc_exptime $arg_exptime;
 
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
@@ -194,6 +199,8 @@ Logged in 56
 
 
 === TEST 7: working with ngx_auth_request (simplest form)
+--- skip_eval: 3:$ENV{TEST_NGINX_USE_HTTP3}
+--- no_http2
 --- http_config eval
 "
     lua_package_cpath '$::LuaCpath';
@@ -207,7 +214,7 @@ Logged in 56
     location /memc {
         internal;
 
-        set $memc_key $arg_key;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:7:$arg_key";
         set $memc_exptime $arg_exptime;
 
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
@@ -266,6 +273,8 @@ Logged in 56
 
 
 === TEST 8: working with ngx_auth_request
+--- no_http2
+--- skip_eval: 3:$ENV{TEST_NGINX_USE_HTTP3}
 --- http_config eval
 "
     lua_package_cpath '$::LuaCpath';
@@ -289,7 +298,7 @@ Logged in 56
     location /memc {
         internal;
 
-        set $memc_key $arg_key;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:8:$arg_key";
         set $memc_exptime $arg_exptime;
 
         set_hashed_upstream $backend memc_cluster $arg_key;
@@ -368,7 +377,7 @@ Logged in 56
     location /memc {
         internal;
 
-        set $memc_key $arg_key;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:9:$arg_key";
         set $memc_exptime $arg_exptime;
 
         #set_hashed_upstream $backend memc_cluster $arg_key;
@@ -452,7 +461,7 @@ Hi
 --- config
     location /lua {
         content_by_lua '
-            function f ()
+            local function f ()
                 ngx.say("hello")
                 ngx.exit(200)
             end
@@ -652,6 +661,7 @@ GET /t
 --- response_body_like: 403 Forbidden
 --- no_error_log
 [error]
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -670,6 +680,7 @@ GET /t
 --- response_body
 --- no_error_log
 [error]
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -706,6 +717,7 @@ F(ngx_http_lua_header_filter_by_chunk).return {
 --- no_error_log
 [error]
 [alert]
+--- skip_eval: 4:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -723,4 +735,105 @@ GET /t
 --- response_body
 --- no_error_log
 [error]
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
+
+
+=== TEST 25: 501 Method Not Implemented
+--- config
+    location /lua {
+        content_by_lua '
+            ngx.exit(ngx.HTTP_NOT_IMPLEMENTED)
+        ';
+    }
+--- request
+GET /lua
+--- error_code: 501
+--- response_body_like: 501 (?:Method )?Not Implemented
+--- no_error_log
+[error]
+
+
+
+=== TEST 26: accepts NGX_OK
+--- config
+    location = /t {
+        content_by_lua_block {
+            ngx.exit(ngx.OK)
+        }
+    }
+--- request
+GET /t
+--- response_body
+--- no_error_log
+[error]
+
+
+
+=== TEST 27: accepts NGX_ERROR
+--- no_http2
+--- config
+    location = /t {
+        content_by_lua_block {
+            ngx.exit(ngx.ERROR)
+        }
+    }
+--- request
+GET /t
+--- error_code:
+--- response_body
+--- no_error_log
+[error]
+--- curl_error
+curl: (95) HTTP/3 stream 0 reset by server (error 0x102 INTERNAL_ERROR)
+
+
+
+=== TEST 28: accepts NGX_DECLINED
+--- no_http2
+--- config
+    location = /t {
+        content_by_lua_block {
+            ngx.exit(ngx.DECLINED)
+        }
+    }
+--- request
+GET /t
+--- error_code:
+--- response_body
+--- no_error_log
+[error]
+--- curl_error
+curl: (95) HTTP/3 stream 0 reset by server (error 0x102 INTERNAL_ERROR)
+
+
+
+=== TEST 29: refuses NGX_AGAIN
+--- config
+    location = /t {
+        content_by_lua_block {
+            ngx.exit(ngx.AGAIN)
+        }
+    }
+--- request
+GET /t
+--- error_code: 500
+--- response_body_like: 500 Internal Server Error
+--- error_log eval
+qr/\[error\] .*? bad argument to 'ngx.exit': does not accept NGX_AGAIN or NGX_DONE/
+
+
+
+=== TEST 30: refuses NGX_DONE
+--- config
+    location = /t {
+        content_by_lua_block {
+            ngx.exit(ngx.DONE)
+        }
+    }
+--- request
+GET /t
+--- error_code: 500
+--- response_body_like: 500 Internal Server Error
+--- error_log eval
+qr/\[error\] .*? bad argument to 'ngx.exit': does not accept NGX_AGAIN or NGX_DONE/

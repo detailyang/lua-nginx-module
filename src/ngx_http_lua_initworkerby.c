@@ -12,6 +12,7 @@
 
 #include "ngx_http_lua_initworkerby.h"
 #include "ngx_http_lua_util.h"
+#include "ngx_http_lua_pipe.h"
 
 
 static u_char *ngx_http_lua_log_init_worker_error(ngx_log_t *log,
@@ -25,6 +26,7 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
     void                        *cur, *prev;
     ngx_uint_t                   i;
     ngx_conf_t                   conf;
+    ngx_conf_file_t              cf_file;
     ngx_cycle_t                 *fake_cycle;
     ngx_module_t               **modules;
     ngx_open_file_t             *file, *ofile;
@@ -40,10 +42,46 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
 
     lmcf = ngx_http_cycle_get_module_main_conf(cycle, ngx_http_lua_module);
 
-    if (lmcf == NULL
-        || lmcf->init_worker_handler == NULL
-        || lmcf->lua == NULL)
+    if (lmcf == NULL || lmcf->lua == NULL) {
+        return NGX_OK;
+    }
+
+    /* lmcf != NULL && lmcf->lua != NULL */
+
+#if !(NGX_WIN32)
+    if (ngx_process == NGX_PROCESS_HELPER
+#   ifdef HAVE_PRIVILEGED_PROCESS_PATCH
+        && !ngx_is_privileged_agent
+#   endif
+       )
     {
+        /* disable init_worker_by_lua* and destroy lua VM in cache processes */
+
+        ngx_log_debug2(NGX_LOG_DEBUG_HTTP, ngx_cycle->log, 0,
+                       "lua close the global Lua VM %p in the "
+                       "cache helper process %P", lmcf->lua, ngx_pid);
+
+        lmcf->vm_cleanup->handler(lmcf->vm_cleanup->data);
+        lmcf->vm_cleanup->handler = NULL;
+
+        return NGX_OK;
+    }
+
+#   ifdef HAVE_NGX_LUA_PIPE
+    if (ngx_http_lua_pipe_add_signal_handler(cycle) != NGX_OK) {
+        return NGX_ERROR;
+    }
+#   endif
+
+#endif  /* NGX_WIN32 */
+
+#if (NGX_HTTP_LUA_HAVE_SA_RESTART)
+    if (lmcf->set_sa_restart) {
+        ngx_http_lua_set_sa_restart(ngx_cycle->log);
+    }
+#endif
+
+    if (lmcf->init_worker_handler == NULL) {
         return NGX_OK;
     }
 
@@ -77,35 +115,42 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
 
     ngx_memcpy(fake_cycle, cycle, sizeof(ngx_cycle_t));
 
-#if defined(nginx_version) && nginx_version >= 9007
+    /*
+     * nginx clears cycle->old_cycle after ngx_init_cycle() completes.
+     * Since nginx 1.29.2, ngx_ssl_cache_fetch() accesses old_cycle->conf_ctx
+     * without a NULL guard, so we must ensure old_cycle is non-NULL.
+     * This avoids a NULL dereference when merge_loc_conf triggers
+     * ngx_ssl_trusted_certificate.
+     * Pointing to the current cycle is safe: the SSL cache is shared via
+     * conf_ctx, so cert lookups still find previously loaded entries.
+     */
+    if (fake_cycle->old_cycle == NULL) {
+        fake_cycle->old_cycle = cycle;
+    }
 
     ngx_queue_init(&fake_cycle->reusable_connections_queue);
 
-#endif
-
     if (ngx_array_init(&fake_cycle->listening, cycle->pool,
-                       cycle->listening.nelts || 1,
+                       cycle->listening.nelts ? cycle->listening.nelts : 1,
                        sizeof(ngx_listening_t))
         != NGX_OK)
     {
         goto failed;
     }
 
-#if defined(nginx_version) && nginx_version >= 1003007
-
-    if (ngx_array_init(&fake_cycle->paths, cycle->pool, cycle->paths.nelts || 1,
+    if (ngx_array_init(&fake_cycle->paths, cycle->pool,
+                       cycle->paths.nelts ? cycle->paths.nelts : 1,
                        sizeof(ngx_path_t *))
         != NGX_OK)
     {
         goto failed;
     }
 
-#endif
-
     part = &cycle->open_files.part;
     ofile = part->elts;
 
-    if (ngx_list_init(&fake_cycle->open_files, cycle->pool, part->nelts || 1,
+    if (ngx_list_init(&fake_cycle->open_files, cycle->pool,
+                      part->nelts ? part->nelts : 1,
                       sizeof(ngx_open_file_t))
         != NGX_OK)
     {
@@ -118,6 +163,7 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
             if (part->next == NULL) {
                 break;
             }
+
             part = part->next;
             ofile = part->elts;
             i = 0;
@@ -143,6 +189,10 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
     conf.pool = fake_cycle->pool;
     conf.log = cycle->log;
 
+    ngx_memzero(&cf_file, sizeof(cf_file));
+    cf_file.file.name = cycle->conf_file;
+    conf.conf_file = &cf_file;
+
     http_ctx.loc_conf = ngx_pcalloc(conf.pool,
                                     sizeof(void *) * ngx_http_max_module);
     if (http_ctx.loc_conf == NULL) {
@@ -155,7 +205,7 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
         return NGX_ERROR;
     }
 
-#if defined(nginx_version) && nginx_version >= 1009011
+#if (nginx_version >= 1009011)
     modules = cycle->modules;
 #else
     modules = ngx_modules;
@@ -240,26 +290,11 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
-#if defined(nginx_version) && nginx_version >= 1003014
-
-#   if nginx_version >= 1009000
-
+#if (nginx_version >= 1009000)
     ngx_set_connection_log(r->connection, clcf->error_log);
 
-#   else
-
-    ngx_http_set_connection_log(r->connection, clcf->error_log);
-
-#   endif
-
 #else
-
-    c->log->file = clcf->error_log->file;
-
-    if (!(c->log->log_level & NGX_LOG_DEBUG_CONNECTION)) {
-        c->log->log_level = clcf->error_log->log_level;
-    }
-
+    ngx_http_set_connection_log(r->connection, clcf->error_log);
 #endif
 
     ctx = ngx_http_lua_create_ctx(r);
@@ -274,6 +309,8 @@ ngx_http_lua_init_worker(ngx_cycle_t *cycle)
     ngx_http_lua_set_req(lmcf->lua, r);
 
     (void) lmcf->init_worker_handler(cycle->log, lmcf, lmcf->lua);
+
+    ngx_http_lua_set_req(lmcf->lua, NULL);
 
     ngx_destroy_pool(c->pool);
     return NGX_OK;
@@ -297,9 +334,17 @@ ngx_http_lua_init_worker_by_inline(ngx_log_t *log,
     ngx_http_lua_main_conf_t *lmcf, lua_State *L)
 {
     int         status;
+    const char *chunkname;
+
+    if (lmcf->init_worker_chunkname == NULL) {
+        chunkname = "=init_worker_by_lua";
+
+    } else {
+        chunkname = (const char *) lmcf->init_worker_chunkname;
+    }
 
     status = luaL_loadbuffer(L, (char *) lmcf->init_worker_src.data,
-                             lmcf->init_worker_src.len, "=init_worker_by_lua")
+                             lmcf->init_worker_src.len, chunkname)
              || ngx_http_lua_do_call(log, L);
 
     return ngx_http_lua_report(log, L, status, "init_worker_by_lua");
@@ -332,3 +377,6 @@ ngx_http_lua_log_init_worker_error(ngx_log_t *log, u_char *buf, size_t len)
 
     return ngx_snprintf(buf, len, ", context: init_worker_by_lua*");
 }
+
+
+/* vi:set ft=c ts=4 sw=4 et fdm=marker: */

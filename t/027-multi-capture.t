@@ -9,6 +9,8 @@ plan tests => repeat_each() * (blocks() * 2 + 4);
 #$ENV{LUA_PATH} = $ENV{HOME} . '/work/JSON4Lua-0.9.30/json/?.lua';
 $ENV{TEST_NGINX_MYSQL_PORT} ||= 3306;
 $ENV{TEST_NGINX_MEMCACHED_PORT} ||= 11211;
+# Isolate keys from other files and concurrent runs of this file.
+$ENV{TEST_NGINX_MEMCACHED_PREFIX} = "lua_nginx_027_multi_capture_$$";
 
 #log_level 'warn';
 no_long_string();
@@ -151,7 +153,7 @@ res2.body = b
 
     location /main {
         content_by_lua '
-            res = ngx.location.capture("/foo?n=1")
+            local res = ngx.location.capture("/foo?n=1")
             ngx.say("top res.status = " .. res.status)
             ngx.say("top res.body = [" .. res.body .. "]")
         ';
@@ -253,7 +255,8 @@ top res2.body = [2 res1.status = 200
         ';
     }
     location ~ '^/[ab]$' {
-        set $memc_key $uri;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:6:$uri";
+        set $memc_exptime 600;
         set $memc_value hello;
         set $memc_cmd set;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
@@ -309,7 +312,8 @@ res2.body = STORED\r
         ';
     }
     location ~ '^/[abcd]$' {
-        set $memc_key $uri;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:7:$uri";
+        set $memc_exptime 600;
         set $memc_value hello;
         set $memc_cmd set;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
@@ -361,7 +365,8 @@ res2.body = [2 res1.status = 201
         ';
     }
     location ~ '^/[a-d]$' {
-        set $memc_key $uri;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:8:$uri";
+        set $memc_exptime 600;
         set $memc_value hello;
         set $memc_cmd set;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
@@ -487,7 +492,8 @@ res4.body = b
     }
 
     location /memc {
-        set $memc_key $arg_val;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:10:$arg_val";
+        set $memc_exptime 600;
         set $memc_value $arg_val;
         set $memc_cmd $arg_cmd;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
@@ -572,7 +578,8 @@ res4.body = f
     }
 
     location /memc {
-        set $memc_key $arg_val;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:11:$arg_val";
+        set $memc_exptime 600;
         set $memc_value $arg_val;
         set $memc_cmd $arg_cmd;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
@@ -639,7 +646,8 @@ access B: B
     }
 
     location /memc {
-        set $memc_key $arg_val;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:12:$arg_val";
+        set $memc_exptime 600;
         set $memc_value $arg_val;
         set $memc_cmd $arg_cmd;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
@@ -743,7 +751,7 @@ proxy_cache_path conf/cache levels=1:2 keys_zone=STATIC:10m inactive=10m max_siz
 
     location = /proxy {
             proxy_cache STATIC;
-            proxy_pass http://agentzh.org:12345;
+            proxy_pass http://127.0.0.2:12345;
             proxy_cache_key $proxy_host$uri$args;
             proxy_cache_valid any 1s;
             #proxy_http_version 1.1;
@@ -753,3 +761,74 @@ proxy_cache_path conf/cache levels=1:2 keys_zone=STATIC:10m inactive=10m max_siz
 --- response_body
 ok
 
+
+
+=== TEST 14: capture multi with headers
+--- config
+    location /foo {
+        content_by_lua_block {
+            local res1, res2, res3 = ngx.location.capture_multi{
+                {"/test", { headers = { ["X-Test-Header"] = "aa"} } },
+                {"/test", { headers = { ["X-Test-Header"] = "bb"} } },
+                {"/test"},
+            }
+            ngx.say("res1.status = " .. res1.status)
+            ngx.say("res1.body = " .. res1.body)
+            ngx.say("res2.status = " .. res2.status)
+            ngx.say("res2.body = " .. res2.body)
+            ngx.say("res3.status = " .. res3.status)
+            ngx.say("res3.body = " .. res3.body)
+        }
+    }
+
+    location = /test {
+        content_by_lua_block {
+            ngx.print(ngx.var.http_x_test_header)
+        }
+    }
+--- request
+    GET /foo
+--- response_body
+res1.status = 200
+res1.body = aa
+res2.status = 200
+res2.body = bb
+res3.status = 200
+res3.body = nil
+
+
+
+=== TEST 15: capture multi with headers override
+--- config
+    location /foo {
+        content_by_lua_block {
+            local res1, res2, res3 = ngx.location.capture_multi{
+                {"/test", { headers = { ["X-Test-Header"] = "aa"} } },
+                {"/test", { headers = { ["X-Test-Header"] = "bb"} } },
+                {"/test"},
+            }
+            ngx.say("res1.status = " .. res1.status)
+            ngx.say("res1.body = " .. res1.body)
+            ngx.say("res2.status = " .. res2.status)
+            ngx.say("res2.body = " .. res2.body)
+            ngx.say("res3.status = " .. res3.status)
+            ngx.say("res3.body = " .. res3.body)
+        }
+    }
+
+    location = /test {
+        content_by_lua_block {
+            ngx.print(ngx.var.http_x_test_header)
+        }
+    }
+--- request
+    GET /foo
+--- more_headers
+X-Test-Header: cc
+--- response_body
+res1.status = 200
+res1.body = aa
+res2.status = 200
+res2.body = bb
+res3.status = 200
+res3.body = cc

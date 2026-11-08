@@ -14,6 +14,8 @@ repeat_each(2);
 plan tests => repeat_each() * (blocks() * 2 + 2);
 
 $ENV{TEST_NGINX_MEMCACHED_PORT} ||= 11211;
+# Isolate keys from other files and concurrent runs of this file.
+$ENV{TEST_NGINX_MEMCACHED_PREFIX} = "lua_nginx_024_access_exit_$$";
 $ENV{TEST_NGINX_MYSQL_PORT} ||= 3306;
 
 our $LuaCpath = $ENV{LUA_CPATH} ||
@@ -114,6 +116,7 @@ GET /api?user=agentz
 
 
 === TEST 6: working with ngx_auth_request (simplest form, w/o ngx_memc)
+--- no_http2
 --- http_config eval
 "
     lua_package_cpath '$::LuaCpath';
@@ -127,7 +130,7 @@ GET /api?user=agentz
     location /memc {
         internal;
 
-        set $memc_key $arg_key;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:6:$arg_key";
         set $memc_exptime $arg_exptime;
 
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
@@ -177,10 +180,12 @@ GET /api?uid=32
 --- response_body
 Logged in 56
 --- timeout: 3
+--- skip_eval: 2:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
 === TEST 7: working with ngx_auth_request (simplest form)
+--- no_http2
 --- http_config eval
 "
     lua_package_cpath '$::LuaCpath';
@@ -194,7 +199,7 @@ Logged in 56
     location /memc {
         internal;
 
-        set $memc_key $arg_key;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:7:$arg_key";
         set $memc_exptime $arg_exptime;
 
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
@@ -243,10 +248,12 @@ ngx.var.uid = res[1].uid;
 GET /api?uid=32
 --- response_body
 Logged in 56
+--- skip_eval: 2:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
 === TEST 8: working with ngx_auth_request
+--- no_http2
 --- http_config eval
 "
     lua_package_cpath '$::LuaCpath';
@@ -270,7 +277,7 @@ Logged in 56
     location /memc {
         internal;
 
-        set $memc_key $arg_key;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:8:$arg_key";
         set $memc_exptime $arg_exptime;
 
         set_hashed_upstream $backend memc_cluster $arg_key;
@@ -320,6 +327,7 @@ ngx.var.uid = res[1].uid;
 GET /api?uid=32
 --- response_body
 Logged in 56
+--- skip_eval: 2:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -342,7 +350,7 @@ Logged in 56
     location /memc {
         internal;
 
-        set $memc_key $arg_key;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:9:$arg_key";
         set $memc_exptime $arg_exptime;
 
         #set_hashed_upstream $backend memc_cluster $arg_key;
@@ -545,4 +553,3 @@ Not found, dear...
 --- response_body
 Not found, dear...
 --- error_code: 404
-

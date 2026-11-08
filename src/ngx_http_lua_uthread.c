@@ -25,6 +25,49 @@
 static int ngx_http_lua_uthread_spawn(lua_State *L);
 static int ngx_http_lua_uthread_wait(lua_State *L);
 static int ngx_http_lua_uthread_kill(lua_State *L);
+static void ngx_http_lua_uthread_cleanup_descendants(ngx_http_lua_ctx_t *ctx,
+    ngx_http_lua_co_ctx_t *parent);
+
+
+static void
+ngx_http_lua_uthread_cleanup_descendants(ngx_http_lua_ctx_t *ctx,
+    ngx_http_lua_co_ctx_t *parent)
+{
+    ngx_uint_t                       i;
+    ngx_list_part_t                 *part;
+    ngx_http_lua_co_ctx_t           *coctx, *cur;
+
+    if (ctx->user_co_ctx == NULL) {
+        return;
+    }
+
+    part = &ctx->user_co_ctx->part;
+    coctx = part->elts;
+
+    for (i = 0; /* void */; i++) {
+
+        if (i >= part->nelts) {
+            if (part->next == NULL) {
+                break;
+            }
+
+            part = part->next;
+            coctx = part->elts;
+            i = 0;
+        }
+
+        if (&coctx[i] == parent || coctx[i].is_uthread) {
+            continue;
+        }
+
+        for (cur = coctx[i].parent_co_ctx; cur; cur = cur->parent_co_ctx) {
+            if (cur == parent) {
+                ngx_http_lua_cleanup_pending_operation(&coctx[i]);
+                break;
+            }
+        }
+    }
+}
 
 
 void
@@ -49,7 +92,7 @@ ngx_http_lua_inject_uthread_api(ngx_log_t *log, lua_State *L)
 static int
 ngx_http_lua_uthread_spawn(lua_State *L)
 {
-    int                           n;
+    int                           n, co_ref;
     ngx_http_request_t           *r;
     ngx_http_lua_ctx_t           *ctx;
     ngx_http_lua_co_ctx_t        *coctx = NULL;
@@ -66,21 +109,16 @@ ngx_http_lua_uthread_spawn(lua_State *L)
         return luaL_error(L, "no request ctx found");
     }
 
-    ngx_http_lua_coroutine_create_helper(L, r, ctx, &coctx);
+    ngx_http_lua_coroutine_create_helper(L, r, ctx, &coctx, &co_ref);
 
     /* anchor the newly created coroutine into the Lua registry */
-
-    lua_pushlightuserdata(L, &ngx_http_lua_coroutines_key);
-    lua_rawget(L, LUA_REGISTRYINDEX);
-    lua_pushvalue(L, -2);
-    coctx->co_ref = luaL_ref(L, -2);
-    lua_pop(L, 1);
 
     if (n > 1) {
         lua_replace(L, 1);
         lua_xmove(L, coctx->co, n - 1);
     }
 
+    coctx->co_ref = co_ref;
     coctx->is_uthread = 1;
     ctx->uthreads++;
 
@@ -95,6 +133,8 @@ ngx_http_lua_uthread_spawn(lua_State *L)
 
     coctx->parent_co_ctx = ctx->cur_co_ctx;
     ctx->cur_co_ctx = coctx;
+
+    ngx_http_lua_attach_co_ctx_to_L(coctx->co, coctx);
 
     ngx_http_lua_probe_user_thread_spawn(r, L, coctx->co);
 
@@ -123,15 +163,14 @@ ngx_http_lua_uthread_wait(lua_State *L)
         return luaL_error(L, "no request ctx found");
     }
 
-    ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
-                               | NGX_HTTP_LUA_CONTEXT_ACCESS
-                               | NGX_HTTP_LUA_CONTEXT_CONTENT
-                               | NGX_HTTP_LUA_CONTEXT_TIMER
-                               | NGX_HTTP_LUA_CONTEXT_SSL_CERT);
+    ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_YIELDABLE);
 
     coctx = ctx->cur_co_ctx;
 
     nargs = lua_gettop(L);
+    if (nargs == 0) {
+        return luaL_error(L, "at least one coroutine should be specified");
+    }
 
     for (i = 1; i <= nargs; i++) {
         sub_co = lua_tothread(L, i);
@@ -221,11 +260,7 @@ ngx_http_lua_uthread_kill(lua_State *L)
         return luaL_error(L, "no request ctx found");
     }
 
-    ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
-                               | NGX_HTTP_LUA_CONTEXT_ACCESS
-                               | NGX_HTTP_LUA_CONTEXT_CONTENT
-                               | NGX_HTTP_LUA_CONTEXT_TIMER
-                               | NGX_HTTP_LUA_CONTEXT_SSL_CERT);
+    ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_YIELDABLE);
 
     coctx = ctx->cur_co_ctx;
 
@@ -272,6 +307,7 @@ ngx_http_lua_uthread_kill(lua_State *L)
 
     default:
         ngx_http_lua_cleanup_pending_operation(sub_coctx);
+        ngx_http_lua_uthread_cleanup_descendants(ctx, sub_coctx);
         ngx_http_lua_del_thread(r, L, ctx, sub_coctx);
         ctx->uthreads--;
 
@@ -279,7 +315,7 @@ ngx_http_lua_uthread_kill(lua_State *L)
         return 1;
     }
 
-    /* not reacheable */
+    /* not reachable */
 }
 
 /* vi:set ft=c ts=4 sw=4 et fdm=marker: */

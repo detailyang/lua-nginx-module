@@ -16,6 +16,7 @@ BEGIN {
         $ENV{MOCKEAGAIN} = 'w';
     }
 
+    delete($ENV{TEST_NGINX_USE_HTTP2});
     $ENV{TEST_NGINX_EVENT_TYPE} = 'poll';
     $ENV{MOCKEAGAIN_WRITE_TIMEOUT_PATTERN} = 'get helloworld';
 }
@@ -28,7 +29,7 @@ our $StapScript = $t::StapThread::StapScript;
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 4 + 12);
+plan tests => repeat_each() * (blocks() * 4 + 6);
 
 our $HtmlDir = html_dir;
 
@@ -51,7 +52,7 @@ __DATA__
     location /t {
         content_by_lua '
             local sock = ngx.socket.tcp()
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -66,7 +67,7 @@ GET /t
 failed to connect: timeout
 --- error_log
 lua tcp socket connect timeout: 100
-lua tcp socket connect timed out
+lua tcp socket connect timed out, upstream: 127.0.0.2:12345(127.0.0.2)
 --- timeout: 10
 
 
@@ -81,7 +82,7 @@ lua tcp socket connect timed out
         content_by_lua '
             local sock = ngx.socket.tcp()
             sock:settimeout(150)
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -96,7 +97,7 @@ GET /t
 failed to connect: timeout
 --- error_log
 lua tcp socket connect timeout: 150
-lua tcp socket connect timed out
+lua tcp socket connect timed out, upstream: 127.0.0.2:12345(127.0.0.2)
 --- timeout: 10
 
 
@@ -110,7 +111,7 @@ lua tcp socket connect timed out
         content_by_lua '
             local sock = ngx.socket.tcp()
             sock:settimeout(nil)
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -125,7 +126,7 @@ GET /t
 failed to connect: timeout
 --- error_log
 lua tcp socket connect timeout: 102
-lua tcp socket connect timed out
+lua tcp socket connect timed out, upstream: 127.0.0.2:12345(127.0.0.2)
 
 
 
@@ -139,7 +140,7 @@ lua tcp socket connect timed out
         content_by_lua '
             local sock = ngx.socket.tcp()
             sock:settimeout(0)
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -154,12 +155,12 @@ GET /t
 failed to connect: timeout
 --- error_log
 lua tcp socket connect timeout: 102
-lua tcp socket connect timed out
+lua tcp socket connect timed out, upstream: 127.0.0.2:12345(127.0.0.2)
 --- timeout: 10
 
 
 
-=== TEST 5: sock:settimeout(-1) does not override lua_socket_connect_timeout
+=== TEST 5: -1 is bad timeout value
 --- config
     server_tokens off;
     lua_socket_connect_timeout 102ms;
@@ -168,7 +169,7 @@ lua tcp socket connect timed out
         content_by_lua '
             local sock = ngx.socket.tcp()
             sock:settimeout(-1)
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -179,11 +180,11 @@ lua tcp socket connect timed out
     }
 --- request
 GET /t
---- response_body
-failed to connect: timeout
+--- response_body_like chomp
+500 Internal Server Error
 --- error_log
-lua tcp socket connect timeout: 102
-lua tcp socket connect timed out
+bad timeout value
+--- error_code: 500
 
 
 
@@ -342,7 +343,7 @@ lua tcp socket read timed out
 
 
 
-=== TEST 10: sock:settimeout(-1) does not override lua_socket_read_timeout
+=== TEST 10: -1 is bad timeout value
 --- config
     server_tokens off;
     lua_socket_read_timeout 102ms;
@@ -355,8 +356,6 @@ lua tcp socket read timed out
                 ngx.say("failed to connect: ", err)
                 return
             end
-
-            ngx.say("connected: ", ok)
 
             sock:settimeout(-1)
 
@@ -371,13 +370,11 @@ lua tcp socket read timed out
     }
 --- request
 GET /t
---- response_body
-connected: 1
-failed to receive: timeout
+--- response_body_like chomp
+500 Internal Server Error
+--- error_code: 500
 --- error_log
-lua tcp socket read timeout: 102
-lua tcp socket connect timeout: 60000
-lua tcp socket read timed out
+bad timeout value
 
 
 
@@ -563,8 +560,6 @@ lua tcp socket write timed out
                 return
             end
 
-            ngx.say("connected: ", ok)
-
             sock:settimeout(-1)
 
             local bytes
@@ -578,13 +573,11 @@ lua tcp socket write timed out
     }
 --- request
 GET /t
---- response_body
-connected: 1
-failed to send: timeout
+--- response_body_like chomp
+500 Internal Server Error
 --- error_log
-lua tcp socket send timeout: 102
-lua tcp socket connect timeout: 60000
-lua tcp socket write timed out
+bad timeout value
+--- error_code: 500
 
 
 
@@ -592,7 +585,7 @@ lua tcp socket write timed out
 --- config
     location /lua {
         content_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.1)
                 ngx.exit(0)
@@ -691,7 +684,7 @@ after
     location /t {
         content_by_lua '
             local sock = ngx.socket.tcp()
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("1: failed to connect: ", err)
 
@@ -715,7 +708,7 @@ GET /t
 2: connected: 1
 --- error_log
 lua tcp socket connect timeout: 100
-lua tcp socket connect timed out
+lua tcp socket connect timed out, upstream: 127.0.0.2:12345(127.0.0.2)
 --- timeout: 10
 
 
@@ -881,6 +874,7 @@ quitting request now
 --- no_error_log
 lua tcp socket write timed out
 [alert]
+--- skip_eval: 4: $ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -937,7 +931,7 @@ lua tcp socket read timed out
                     ngx.sleep(0.001)
                 end
 
-                local bytes, err = sock:send("flush_all")
+                local bytes, err = sock:send("get __nil")
                 ngx.say("send: ", bytes, " ", err)
 
                 local ok, err = sock:close()
@@ -995,3 +989,32 @@ close: 1 nil
 --- no_error_log
 [error]
 
+
+
+=== TEST 23: timeout overflow detection
+--- config
+    location /t {
+        content_by_lua_block {
+            local sock = ngx.socket.tcp()
+            local ok, err = pcall(sock.settimeout, sock, (2 ^ 31) - 1)
+            if not ok then
+                ngx.say("failed to set timeout: ", err)
+            else
+                ngx.say("settimeout: ok")
+            end
+
+            ok, err = pcall(sock.settimeout, sock, 2 ^ 31)
+            if not ok then
+                ngx.say("failed to set timeout: ", err)
+            else
+                ngx.say("settimeout: ok")
+            end
+        }
+    }
+--- request
+GET /t
+--- response_body_like
+settimeout: ok
+failed to set timeout: bad timeout value
+--- no_error_log
+[error]

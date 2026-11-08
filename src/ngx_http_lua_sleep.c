@@ -52,12 +52,7 @@ ngx_http_lua_ngx_sleep(lua_State *L)
         return luaL_error(L, "no request ctx found");
     }
 
-    ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
-                               | NGX_HTTP_LUA_CONTEXT_ACCESS
-                               | NGX_HTTP_LUA_CONTEXT_CONTENT
-                               | NGX_HTTP_LUA_CONTEXT_TIMER
-                               | NGX_HTTP_LUA_CONTEXT_SSL_CERT
-                               | NGX_HTTP_LUA_CONTEXT_SSL_SESS_FETCH);
+    ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_YIELDABLE);
 
     coctx = ctx->cur_co_ctx;
     if (coctx == NULL) {
@@ -72,10 +67,25 @@ ngx_http_lua_ngx_sleep(lua_State *L)
     coctx->sleep.data = coctx;
     coctx->sleep.log = r->connection->log;
 
-    dd("adding timer with delay %lu ms, r:%.*s", (unsigned long) delay,
-       (int) r->uri.len, r->uri.data);
+    if (delay == 0) {
+#ifdef HAVE_POSTED_DELAYED_EVENTS_PATCH
+        dd("posting 0 sec sleep event to head of delayed queue");
 
-    ngx_add_timer(&coctx->sleep, (ngx_msec_t) delay);
+        coctx->sleep.delayed = 1;
+        ngx_post_event(&coctx->sleep, &ngx_posted_delayed_events);
+#else
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0, "ngx.sleep(0)"
+                      " called without delayed events patch, this will"
+                      " hurt performance");
+        ngx_add_timer(&coctx->sleep, (ngx_msec_t) delay);
+#endif
+
+    } else {
+        dd("adding timer with delay %lu ms, r:%.*s", (unsigned long) delay,
+           (int) r->uri.len, r->uri.data);
+
+        ngx_add_timer(&coctx->sleep, (ngx_msec_t) delay);
+    }
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua ready to sleep for %d ms", delay);
@@ -147,6 +157,24 @@ ngx_http_lua_sleep_cleanup(void *data)
 
         ngx_del_timer(&coctx->sleep);
     }
+
+#ifdef HAVE_POSTED_DELAYED_EVENTS_PATCH
+#if (nginx_version >= 1007005)
+    if (coctx->sleep.posted) {
+#else
+    if (coctx->sleep.prev) {
+#endif
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, ngx_cycle->log, 0,
+                       "lua clean up the posted event for pending ngx.sleep");
+
+        /*
+        * We need the extra parentheses around the argument
+        * of ngx_delete_posted_event() just to work around macro issues in
+        * nginx cores older than 1.7.5 (exclusive).
+        */
+        ngx_delete_posted_event((&coctx->sleep));
+    }
+#endif
 }
 
 
@@ -156,6 +184,7 @@ ngx_http_lua_sleep_resume(ngx_http_request_t *r)
     lua_State                   *vm;
     ngx_connection_t            *c;
     ngx_int_t                    rc;
+    ngx_uint_t                   nreqs;
     ngx_http_lua_ctx_t          *ctx;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
@@ -167,6 +196,7 @@ ngx_http_lua_sleep_resume(ngx_http_request_t *r)
 
     c = r->connection;
     vm = ngx_http_lua_get_lua_vm(r, ctx);
+    nreqs = c->requests;
 
     rc = ngx_http_lua_run_thread(vm, r, ctx, 0);
 
@@ -174,12 +204,12 @@ ngx_http_lua_sleep_resume(ngx_http_request_t *r)
                    "lua run thread returned %d", rc);
 
     if (rc == NGX_AGAIN) {
-        return ngx_http_lua_run_posted_threads(c, vm, r, ctx);
+        return ngx_http_lua_run_posted_threads(c, vm, r, ctx, nreqs);
     }
 
     if (rc == NGX_DONE) {
         ngx_http_lua_finalize_request(r, NGX_DONE);
-        return ngx_http_lua_run_posted_threads(c, vm, r, ctx);
+        return ngx_http_lua_run_posted_threads(c, vm, r, ctx, nreqs);
     }
 
     if (ctx->entered_content_phase) {

@@ -11,7 +11,7 @@ repeat_each(2);
 plan tests => repeat_each() * (blocks() * 2 + 6);
 
 #no_diff();
-#no_long_string();
+no_long_string();
 run_tests();
 
 __DATA__
@@ -21,7 +21,12 @@ __DATA__
     location /lua {
         lua_need_request_body on;
         content_by_lua '
-            local args = ngx.req.get_post_args()
+            local args, err = ngx.req.get_post_args()
+
+            if err then
+                ngx.say("err: ", err)
+            end
+
             local keys = {}
             for key, val in pairs(args) do
                 table.insert(keys, key)
@@ -48,7 +53,12 @@ c = true
     location /lua {
         lua_need_request_body off;
         content_by_lua '
-            local args = ngx.req.get_post_args()
+            local args, err = ngx.req.get_post_args()
+
+            if err then
+                ngx.say("err: ", err)
+            end
+
             local keys = {}
             for key, val in pairs(args) do
                 table.insert(keys, key)
@@ -73,7 +83,12 @@ a=3&b=4&c
     location /lua {
         lua_need_request_body on;
         content_by_lua '
-            local args = ngx.req.get_post_args()
+            local args, err = ngx.req.get_post_args()
+
+            if err then
+                ngx.say("err: ", err)
+            end
+
             local keys = {}
             for key, val in pairs(args) do
                 table.insert(keys, key)
@@ -93,6 +108,7 @@ a=3&b=4&c
 --- request
 POST /lua
 --- response_body
+--- skip_eval: 2:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -101,7 +117,12 @@ POST /lua
     location /lua {
         content_by_lua '
             ngx.req.read_body();
-            local args = ngx.req.get_post_args(2)
+            local args, err = ngx.req.get_post_args(2)
+
+            if err then
+                ngx.say("err: ", err)
+            end
+
             local keys = {}
             for key, val in pairs(args) do
                 table.insert(keys, key)
@@ -117,6 +138,7 @@ POST /lua
 POST /lua
 foo=3&bar=4&baz=2
 --- response_body
+err: truncated
 bar = 4
 foo = 3
 --- error_log
@@ -129,7 +151,12 @@ lua hit query args limit 2
     location /lua {
         content_by_lua '
             ngx.req.read_body();
-            local args = ngx.req.get_post_args(2)
+            local args, err = ngx.req.get_post_args(2)
+
+            if err then
+                ngx.say("err: ", err)
+            end
+
             local keys = {}
             for key, val in pairs(args) do
                 table.insert(keys, key)
@@ -145,6 +172,7 @@ lua hit query args limit 2
 POST /lua
 foo=3&bar&baz=2
 --- response_body
+err: truncated
 bar = true
 foo = 3
 --- error_log
@@ -157,7 +185,12 @@ lua hit query args limit 2
     location /lua {
         content_by_lua '
             ngx.req.read_body();
-            local args = ngx.req.get_post_args(2)
+            local args, err = ngx.req.get_post_args(2)
+
+            if err then
+                ngx.say("err: ", err)
+            end
+
             local keys = {}
             for key, val in pairs(args) do
                 table.insert(keys, key)
@@ -175,6 +208,7 @@ lua hit query args limit 2
 POST /lua
 foo=3&=hello&=world
 --- response_body
+err: truncated
 foo = 3
 done
 --- error_log
@@ -187,7 +221,12 @@ lua hit query args limit 2
     location /lua {
         content_by_lua '
             ngx.req.read_body();
-            local args = ngx.req.get_post_args()
+            local args, err = ngx.req.get_post_args()
+
+            if err then
+                ngx.say("err: ", err)
+            end
+
             local keys = {}
             for key, val in pairs(args) do
                 table.insert(keys, key)
@@ -223,7 +262,7 @@ for my $k (@k) {
         $k .= " = $&\n";
     }
 }
-CORE::join("", @k);
+"err: truncated\n" . CORE::join("", @k);
 --- timeout: 4
 --- error_log
 lua hit query args limit 100
@@ -235,7 +274,12 @@ lua hit query args limit 100
     location /lua {
         content_by_lua '
             ngx.req.read_body()
-            local args = ngx.req.get_post_args(102)
+            local args, err = ngx.req.get_post_args(102)
+
+            if err then
+                ngx.say("err: ", err)
+            end
+
             local keys = {}
             for key, val in pairs(args) do
                 table.insert(keys, key)
@@ -271,7 +315,7 @@ for my $k (@k) {
         $k .= " = $&\n";
     }
 }
-CORE::join("", @k);
+"err: truncated\n" . CORE::join("", @k);
 --- timeout: 4
 --- error_log
 lua hit query args limit 102
@@ -283,7 +327,12 @@ lua hit query args limit 102
     location /lua {
         content_by_lua '
             ngx.req.read_body()
-            local args = ngx.req.get_post_args(0)
+            local args, err = ngx.req.get_post_args(0)
+
+            if err then
+                ngx.say("err: ", err)
+            end
+
             local keys = {}
             for key, val in pairs(args) do
                 table.insert(keys, key)
@@ -332,9 +381,11 @@ CORE::join("", @k);
         content_by_lua_block {
             local args, err = ngx.req.get_post_args()
 
-            if not args then
-                ngx.say(err)
-            else
+            if err then
+                ngx.say("err: ", err)
+            end
+
+            if args then
                 local keys = {}
                 for key, val in pairs(args) do
                     table.insert(keys, key)
@@ -351,6 +402,6 @@ CORE::join("", @k);
 POST /lua
 a=3&b=4&c
 --- response_body
-requesty body in temp file not supported
+err: request body in temp file not supported
 --- no_error_log
 [error]

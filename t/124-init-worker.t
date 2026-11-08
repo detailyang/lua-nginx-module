@@ -3,13 +3,13 @@
 use Test::Nginx::Socket::Lua;
 
 #worker_connections(1014);
-#master_on();
+master_on();
 #workers(2);
 #log_level('warn');
 
 repeat_each(1);
 
-plan tests => repeat_each() * (blocks() * 4);
+plan tests => repeat_each() * (blocks() * 4 + 4);
 
 $ENV{TEST_NGINX_MEMCACHED_PORT} ||= 11211;
 $ENV{TEST_NGINX_RESOLVER} ||= '8.8.8.8';
@@ -123,7 +123,7 @@ warn(): timer expired (premature: false; counter: 0)
                 return
             end
 
-            local req = "flush_all\\r\\n"
+            local req = "get __nil\\r\\n"
 
             local bytes, err = sock:send(req)
             if not bytes then
@@ -175,7 +175,7 @@ ok
 warn(): created timer: 1
 warn(): timer expired (premature: false)
 warn(): request sent: 11
-warn(): received: OK
+warn(): received: END
 
 --- log_level: debug
 --- error_log
@@ -234,7 +234,7 @@ local function handler(premature)
         return
     end
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -286,7 +286,7 @@ ok
 warn(): created timer: 1
 warn(): timer expired (premature: false)
 warn(): request sent: 11
-warn(): received: OK
+warn(): received: END
 
 --- log_level: debug
 --- error_log
@@ -521,15 +521,15 @@ warn(): Thu, 01 Jan 1970 01:34:38 GMT
     }
 --- request
 GET /t
---- response_body
-timer created
+--- response_body_like
 connected: 1
 request sent: 56
-first line received: HTTP/1.1 200 OK
-second line received: Server: openresty
+first line received: HTTP\/1\.1 200 OK
+second line received: (?:Date|Server): .*?
 --- no_error_log
 [error]
 --- timeout: 10
+--- skip_eval: 3:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -550,6 +550,7 @@ second line received: Server: openresty
             else
                 say("connect: ", ok, " ", err)
             end
+            done = true
         end
 
         local ok, err = ngx.timer.at(0, handler)
@@ -600,6 +601,7 @@ qr/connect\(\) failed \(\d+: Connection refused\), context: ngx\.timer$/
             else
                 say("connect: ", ok, " ", err)
             end
+            done = true
         end
 
         local ok, err = ngx.timer.at(0, handler)
@@ -650,6 +652,7 @@ qr/connect\(\) failed \(\d+: Connection refused\)/
             else
                 say("connect: ", ok, " ", err)
             end
+            done = true
         end
 
         local ok, err = ngx.timer.at(0, handler)
@@ -727,8 +730,8 @@ ok
         ';
     }
 --- log_level: error
---- error_log_file: syslog:server=127.0.0.1:12345
---- udp_listen: 12345
+--- error_log_file: syslog:server=127.0.0.1:$TEST_NGINX_RAND_PORT_1
+--- udp_listen: $TEST_NGINX_RAND_PORT_1
 --- udp_query eval: qr/Bad bad bad/
 --- udp_reply: hello
 --- wait: 0.1
@@ -756,3 +759,271 @@ GET /t
 ok
 --- no_error_log
 [error]
+
+
+
+=== TEST 20: destroy Lua VM in cache processes (without privileged agent or shdict)
+--- http_config
+    lua_package_path "../lua-resty-core/lib/?.lua;../lua-resty-lrucache/lib/?.lua;;";
+
+    proxy_cache_path /tmp/cache levels=1:2 keys_zone=cache:1m;
+
+    #lua_shared_dict dummy 500k;
+
+    init_by_lua_block {
+        require "resty.core.regex"
+        assert(ngx.re.match("hello, world", [[hello, \w+]], "joi"))
+        assert(ngx.re.match("hi, world", [[hi, \w+]], "ji"))
+    }
+
+--- config
+    location = /t {
+        return 200;
+    }
+--- request
+    GET /t
+--- grep_error_log eval: qr/lua close the global Lua VM \S+ in the cache helper process \d+|lua close the global Lua VM \S+$/
+--- grep_error_log_out eval
+do {
+    my $close  = qr/lua close the global Lua VM /;
+    my $helper = qr/${close}[0-9A-F]+ in the cache helper process \d+\n/;
+    my $plain  = qr/${close}[0-9A-F]+\n/;
+    my $suffix = qr/ in the cache helper process \d+/;
+    my $skip   = qr/(?:[^\n]*\n)*?/;
+
+    qr/
+        \A
+        (?= $skip $helper $skip $helper )                # at least 2 helper lines
+        (?! $skip $helper $skip $helper $skip $helper )  # but not a 3rd one
+        (?= $skip $plain  $skip $plain  )                # at least 2 plain lines
+        $close ([0-9A-F]+) (?:$suffix)? \n               # 1st line pins the VM address
+        (?: $close \1 (?:$suffix)? \n )*                 # later lines: same address
+        \z
+    /x;
+}
+--- no_error_log
+[error]
+start privileged agent process
+
+
+
+=== TEST 21: destroy Lua VM in cache processes (without privileged agent but with shdict)
+--- http_config
+    lua_package_path "../lua-resty-core/lib/?.lua;../lua-resty-lrucache/lib/?.lua;;";
+
+    proxy_cache_path /tmp/cache levels=1:2 keys_zone=cache:1m;
+
+    lua_shared_dict dummy 500k;
+
+    init_by_lua_block {
+        require "resty.core.regex"
+        assert(ngx.re.match("hello, world", [[hello, \w+]], "joi"))
+        assert(ngx.re.match("hi, world", [[hi, \w+]], "ji"))
+    }
+
+--- config
+    location = /t {
+        return 200;
+    }
+--- request
+    GET /t
+--- grep_error_log eval: qr/lua close the global Lua VM \S+ in the cache helper process \d+|lua close the global Lua VM \S+$/
+--- grep_error_log_out eval
+do {
+    my $close  = qr/lua close the global Lua VM /;
+    my $helper = qr/${close}[0-9A-F]+ in the cache helper process \d+\n/;
+    my $plain  = qr/${close}[0-9A-F]+\n/;
+    my $suffix = qr/ in the cache helper process \d+/;
+    my $skip   = qr/(?:[^\n]*\n)*?/;
+
+    qr/
+        \A
+        (?= $skip $helper $skip $helper )                # at least 2 helper lines
+        (?! $skip $helper $skip $helper $skip $helper )  # but not a 3rd one
+        (?= $skip $plain  $skip $plain  )                # at least 2 plain lines
+        $close ([0-9A-F]+) (?:$suffix)? \n               # 1st line pins the VM address
+        (?: $close \1 (?:$suffix)? \n )*                 # later lines: same address
+        \z
+    /x;
+}
+--- no_error_log
+[error]
+start privileged agent process
+
+
+
+=== TEST 22: destroy Lua VM in cache processes (with privileged agent)
+--- http_config
+    lua_package_path "../lua-resty-core/lib/?.lua;../lua-resty-lrucache/lib/?.lua;;";
+
+    #lua_shared_dict dogs 1m;
+
+    proxy_cache_path /tmp/cache levels=1:2 keys_zone=cache:1m;
+
+    init_by_lua_block {
+        assert(require "ngx.process".enable_privileged_agent())
+        require "resty.core.regex"
+        assert(ngx.re.match("hello, world", [[hello, \w+]], "joi"))
+        assert(ngx.re.match("hi, world", [[hi, \w+]], "ji"))
+    }
+
+--- config
+    location = /t {
+        return 200;
+    }
+--- request
+    GET /t
+--- grep_error_log eval: qr/lua close the global Lua VM \S+ in the cache helper process \d+|lua close the global Lua VM \S+$/
+--- grep_error_log_out eval
+do {
+    my $close  = qr/lua close the global Lua VM /;
+    my $helper = qr/${close}[0-9A-F]+ in the cache helper process \d+\n/;
+    my $plain  = qr/${close}[0-9A-F]+\n/;
+    my $suffix = qr/ in the cache helper process \d+/;
+    my $skip   = qr/(?:[^\n]*\n)*?/;
+
+    qr/
+        \A
+        (?= $skip $helper $skip $helper )                # at least 2 helper lines
+        (?! $skip $helper $skip $helper $skip $helper )  # but not a 3rd one
+        (?= $skip $plain  $skip $plain  )                # at least 2 plain lines
+        $close ([0-9A-F]+) (?:$suffix)? \n               # 1st line pins the VM address
+        (?: $close \1 (?:$suffix)? \n )*                 # later lines: same address
+        \z
+    /x;
+}
+--- error_log eval
+qr/start privileged agent process \d+/
+--- no_error_log
+[error]
+
+
+
+=== TEST 23: destroy Lua VM in cache processes (with init worker and privileged agent)
+--- http_config
+    lua_package_path "../lua-resty-core/lib/?.lua;../lua-resty-lrucache/lib/?.lua;;";
+
+    #lua_shared_dict dogs 1m;
+
+    proxy_cache_path /tmp/cache levels=1:2 keys_zone=cache:1m;
+
+    init_by_lua_block {
+        assert(require "ngx.process".enable_privileged_agent())
+        require "resty.core.regex"
+        assert(ngx.re.match("hello, world", [[hello, \w+]], "joi"))
+        assert(ngx.re.match("hi, world", [[hi, \w+]], "ji"))
+    }
+
+    init_worker_by_lua_block {
+        ngx.log(ngx.WARN, "hello from init worker by lua")
+    }
+
+--- config
+    location = /t {
+        return 200;
+    }
+--- request
+    GET /t
+--- grep_error_log eval: qr/hello from init worker by lua/
+--- grep_error_log_out
+hello from init worker by lua
+hello from init worker by lua
+
+--- error_log eval
+[
+qr/start privileged agent process \d+$/,
+qr/lua close the global Lua VM ([0-9A-F]+) in the cache helper process \d+$/,
+qr/lua close the global Lua VM ([0-9A-F]+)$/,
+]
+--- no_error_log
+[error]
+
+
+
+=== TEST 24: destroy Lua VM in cache processes (with init worker but without privileged agent)
+--- http_config
+    lua_package_path "../lua-resty-core/lib/?.lua;../lua-resty-lrucache/lib/?.lua;;";
+
+    #lua_shared_dict dogs 1m;
+
+    proxy_cache_path /tmp/cache levels=1:2 keys_zone=cache:1m;
+
+    init_by_lua_block {
+        require "resty.core.regex"
+        assert(ngx.re.match("hello, world", [[hello, \w+]], "joi"))
+        assert(ngx.re.match("hi, world", [[hi, \w+]], "ji"))
+    }
+
+    init_worker_by_lua_block {
+        ngx.log(ngx.WARN, "hello from init worker by lua")
+    }
+
+--- config
+    location = /t {
+        return 200;
+    }
+--- request
+    GET /t
+
+--- grep_error_log eval: qr/hello from init worker by lua/
+--- grep_error_log_out
+hello from init worker by lua
+
+--- error_log eval
+[
+qr/lua close the global Lua VM ([0-9A-F]+) in the cache helper process \d+$/,
+qr/lua close the global Lua VM ([0-9A-F]+)$/,
+]
+--- no_error_log
+[error]
+start privileged agent process
+
+
+
+=== TEST 25: syntax error in init_worker_by_lua_block
+--- http_config
+    init_worker_by_lua_block {
+        ngx.log(ngx.debug, "pass")
+        error("failed to init"
+        ngx.log(ngx.debug, "unreachable")
+    }
+--- config
+    location /t {
+        content_by_lua_block {
+            ngx.say("hello world")
+        }
+    }
+--- request
+    GET /t
+--- response_body
+hello world
+--- error_log
+init_worker_by_lua error: init_worker_by_lua(nginx.conf:25):4: ')' expected (to close '(' at line 3) near 'ngx'
+--- no_error_log
+no_such_error_log
+
+
+
+=== TEST 26: syntax error in init_worker_by_lua_file
+--- http_config
+    init_worker_by_lua_file html/init.lua;
+--- config
+    location /t {
+        content_by_lua_block {
+            ngx.say("hello world")
+        }
+    }
+--- user_files
+>>> init.lua
+    ngx.log(ngx.debug, "pass")
+    error("failed to init"
+    ngx.log(ngx.debug, "unreachable")
+
+--- request
+    GET /t
+--- response_body
+hello world
+--- error_log eval
+qr|init_worker_by_lua_file error: .*?t/servroot\w*/html/init.lua:3: '\)' expected \(to close '\(' at line 2\) near 'ngx'|
+--- no_error_log
+no_such_error_log

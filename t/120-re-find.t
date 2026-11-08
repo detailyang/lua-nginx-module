@@ -9,7 +9,7 @@ use Test::Nginx::Socket::Lua;
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 3 + 1);
+plan 'no_plan';
 
 #no_diff();
 no_long_string();
@@ -33,6 +33,7 @@ __DATA__
                 end
                 ngx.say("not matched!")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -62,6 +63,7 @@ matched: 1234
                 end
                 ngx.say("not matched!")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -88,6 +90,7 @@ matched:
             else
                 ngx.say("not matched!")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -115,6 +118,7 @@ matched: hello, 1234
             else
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -136,6 +140,7 @@ not matched.
             else
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -161,6 +166,7 @@ not matched.
             else
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -186,6 +192,7 @@ matched: hello
             end
 
             ngx.say(string.sub(s, from, to))
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -211,6 +218,7 @@ matched: hello
             else
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -238,6 +246,7 @@ matched: world
             else
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -265,6 +274,7 @@ matched: hello
             else
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -290,6 +300,7 @@ not matched.
             else
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -318,6 +329,7 @@ world
             else
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -335,6 +347,7 @@ matched: he
 --- config
     location /re {
         content_by_lua '
+            collectgarbage("collect")
             local s = "hello\\nworld"
             local from, to, err = ngx.re.find(s, "(abc")
             if from then
@@ -354,8 +367,11 @@ matched: he
     }
 --- request
     GET /re
---- response_body
-error: pcre_compile() failed: missing ) in "(abc"
+--- response_body eval
+$Test::Nginx::Util::PcreVersion == 2 ?
+"error: pcre2_compile() failed: missing closing parenthesis in \"(abc\"\n"
+:
+"error: pcre_compile() failed: missing ) in \"(abc\"\n"
 --- no_error_log
 [error]
 
@@ -380,6 +396,7 @@ error: pcre_compile() failed: missing ) in "(abc"
 
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -410,6 +427,7 @@ unknown flag "H"
 
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -440,6 +458,7 @@ not matched.
 
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -467,6 +486,7 @@ matched: 1234
                 ngx.say("not matched!")
                 ngx.say("pos: ", ctx.pos)
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -494,6 +514,7 @@ pos: 5
                 ngx.say("not matched!")
                 ngx.say("pos: ", ctx.pos)
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -526,6 +547,7 @@ pos: 5
 
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
@@ -558,12 +580,16 @@ matched: hello, 1234
             else
                 ngx.say("not matched")
             end
+            collectgarbage("collect")
         ';
     }
 --- request
 GET /t
---- response_body_like chop
-^error: pcre_exec\(\) failed: -10$
+--- response_body eval
+$Test::Nginx::Util::PcreVersion == 2 ?
+"error: pcre_exec\(\) failed: -4\n"
+:
+"error: pcre_exec\(\) failed: -10\n"
 
 --- no_error_log
 [error]
@@ -584,9 +610,11 @@ GET /t
             else
                 ngx.say("not matched.")
             end
+            collectgarbage("collect")
         ';
     }
 --- stap
+# TODO: PCRE2 use different option values from PCRE
 probe process("$LIBPCRE_PATH").function("pcre_compile") {
     printf("compile opts: %x\n", $options)
 }
@@ -622,17 +650,12 @@ matched: 你
 >>> a.lua
 local re = [==[(?i:([\s'\"`´’‘\(\)]*)?([\d\w]+)([\s'\"`´’‘\(\)]*)?(?:=|<=>|r?like|sounds\s+like|regexp)([\s'\"`´’‘\(\)]*)?\2|([\s'\"`´’‘\(\)]*)?([\d\w]+)([\s'\"`´’‘\(\)]*)?(?:!=|<=|>=|<>|<|>|\^|is\s+not|not\s+like|not\s+regexp)([\s'\"`´’‘\(\)]*)?(?!\6)([\d\w]+))]==]
 
-s = string.rep([[ABCDEFG]], 10)
+collectgarbage("collect")
+local s = string.rep([[ABCDEFG]], 10)
 
 local start = ngx.now()
 
 local from, to, err = ngx.re.find(s, re, "o")
-
---[[
-ngx.update_time()
-local elapsed = ngx.now() - start
-ngx.say(elapsed, " sec elapsed.")
-]]
 
 if not from then
     if err then
@@ -645,8 +668,14 @@ end
 
 --- request
     GET /re
---- response_body
-error: pcre_exec() failed: -8
+--- response_body eval
+# lua_regex_match_limit uses pcre_extra->match_limit in the PCRE,
+# but PCRE2 replaces this with pcre2_set_match_limit interface,
+# which has different effects.
+$Test::Nginx::Util::PcreVersion == 2 ?
+"failed to match.\n"
+:
+"error: pcre_exec() failed: -8\n"
 --- no_error_log
 [error]
 
@@ -664,17 +693,12 @@ error: pcre_exec() failed: -8
 >>> a.lua
 local re = [==[(?i:([\s'\"`´’‘\(\)]*)?([\d\w]+)([\s'\"`´’‘\(\)]*)?(?:=|<=>|r?like|sounds\s+like|regexp)([\s'\"`´’‘\(\)]*)?\2|([\s'\"`´’‘\(\)]*)?([\d\w]+)([\s'\"`´’‘\(\)]*)?(?:!=|<=|>=|<>|<|>|\^|is\s+not|not\s+like|not\s+regexp)([\s'\"`´’‘\(\)]*)?(?!\6)([\d\w]+))]==]
 
-s = string.rep([[ABCDEFG]], 10)
+collectgarbage("collect")
+local s = string.rep([[ABCDEFG]], 10)
 
 local start = ngx.now()
 
 local from, to, err = ngx.re.find(s, re, "o")
-
---[[
-ngx.update_time()
-local elapsed = ngx.now() - start
-ngx.say(elapsed, " sec elapsed.")
-]]
 
 if not from then
     if err then
@@ -699,6 +723,7 @@ failed to match
     location /re {
         content_by_lua '
             local s = "hello, 1234"
+            collectgarbage("collect")
             local from, to, err = ngx.re.find(s, "([0-9])([0-9]+)", "jo", nil, 1)
             if from then
                 ngx.say("from: ", from)
@@ -727,6 +752,7 @@ matched: 1
 --- config
     location /re {
         content_by_lua '
+            collectgarbage("collect")
             local s = "hello, 1234"
             local from, to, err = ngx.re.find(s, "([0-9])([0-9]+)", "jo", nil, 0)
             if from then
@@ -756,6 +782,7 @@ matched: 1234
 --- config
     location /re {
         content_by_lua '
+            collectgarbage("collect")
             local s = "hello, 1234"
             local from, to, err = ngx.re.find(s, "([0-9])([0-9]+)", "jo", nil, 2)
             if from then
@@ -785,6 +812,7 @@ matched: 234
 --- config
     location /re {
         content_by_lua '
+            collectgarbage("collect")
             local s = "hello, 1234"
             local from, to, err = ngx.re.find(s, "([0-9])([0-9]+)", "jo", nil, 3)
             if from then
@@ -813,6 +841,7 @@ error: nth out of bound
 --- config
     location /re {
         content_by_lua '
+            collectgarbage("collect")
             local s = "hello, 1234"
             local from, to, err = ngx.re.find(s, "([0-9])([0-9]+)", "jo", nil, 4)
             if from then
@@ -841,6 +870,7 @@ error: nth out of bound
 --- config
     location /re {
         content_by_lua '
+            collectgarbage("collect")
             local s = "hello, 1234"
             local from, to, err = ngx.re.find(s, "([0-9])|(hello world)", "jo", nil, 2)
             if from or to then
@@ -869,6 +899,7 @@ not matched!
 --- config
     location /re {
         content_by_lua '
+            collectgarbage("collect")
             local s = "hello, 1234"
             local from, to, err = ngx.re.find(s, "(hello world)|([0-9])", "jo", nil, 1)
             if from or to then
@@ -897,6 +928,7 @@ not matched!
 --- config
     location /re {
         content_by_lua '
+            collectgarbage("collect")
             local ctx = { pos = 3 }
             local from, to, err = ngx.re.find("1234, hello", [[(\G[0-9]+)]], "", ctx)
             if from then
@@ -915,5 +947,38 @@ not matched!
 from: 3
 to: 4
 pos: 5
+--- no_error_log
+[error]
+
+
+
+=== TEST 32: ignore match limit in DFA mode
+--- http_config
+    lua_regex_match_limit 1;
+--- config
+    location /re {
+        content_by_lua_block {
+            collectgarbage("collect")
+            local s = "This is <something> <something else> <something further> no more"
+            local from, to, err = ngx.re.find(s, "<.*>", "d")
+            if from then
+                ngx.say("from: ", from)
+                ngx.say("to: ", to)
+                ngx.say("matched: ", string.sub(s, from, to))
+            else
+                if err then
+                    ngx.say("error: ", err)
+                    return
+                end
+                ngx.say("not matched!")
+            end
+        }
+    }
+--- request
+    GET /re
+--- response_body
+from: 9
+to: 56
+matched: <something> <something else> <something further>
 --- no_error_log
 [error]

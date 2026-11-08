@@ -79,7 +79,7 @@ qr{\[crit\] .*? connect\(\) to unix:/tmp/nosuchfile\.sock failed}
 --- request
     GET /test
 --- response_body
-failed to connect: failed to parse host name "/tmp/test-nginx.sock": invalid host
+failed to connect: missing the port number
 
 
 
@@ -150,4 +150,3 @@ received:
 received: foo
 failed to receive a line: closed
 close: 1 nil
-

@@ -7,7 +7,7 @@ log_level('warn');
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 4 + 52 );
+plan tests => repeat_each() * (blocks() * 4 + 58);
 
 #no_diff();
 no_long_string();
@@ -351,9 +351,18 @@ hello, world
 --- user_files
 >>> a.txt
 Will you change this world?
---- raw_response_headers_like
-X-Old: \S+/client_body_temp/\d+\r
-.*?X-New: \S+/html/a\.txt\r
+--- raw_response_headers_like eval
+my $headers;
+
+if (defined $ENV{TEST_NGINX_USE_HTTP3}) {
+    $headers = qr#x-old: \S+/client_body_temp/\d+\r
+.*?x-new: \S+/html/a\.txt\r#;
+} else {
+    $headers = qr#X-Old: \S+/client_body_temp/\d+\r
+.*?X-New: \S+/html/a\.txt\r#;
+}
+
+$headers;
 --- response_body
 Will you change this world?
 --- no_error_log
@@ -390,9 +399,18 @@ hello, world!
 --- user_files
 >>> a.txt
 Will you change this world?
---- raw_response_headers_like
-X-Old: \S+/client_body_temp/\d+\r
-.*?X-New: \S+/html/a\.txt\r
+--- raw_response_headers_like eval
+my $headers;
+
+if (defined $ENV{TEST_NGINX_USE_HTTP3}) {
+    $headers = qr#x-old: \S+/client_body_temp/\d+\r
+.*?x-new: \S+/html/a\.txt\r#;
+} else {
+    $headers = qr#X-Old: \S+/client_body_temp/\d+\r
+.*?X-New: \S+/html/a\.txt\r#;
+}
+
+$headers;
 --- response_body
 Will you change this world?
 --- no_error_log
@@ -440,7 +458,7 @@ b.txt exists: yes
 
 
 
-=== TEST 17: read buffered body to memoary and reset it to a new file (auto-clean)
+=== TEST 17: read buffered body to memory and reset it to a new file (auto-clean)
 --- config
     client_body_in_file_only off;
 
@@ -476,7 +494,7 @@ qr/500 Internal Server Error/]
 
 
 
-=== TEST 18: read buffered body to memoary and reset it to a new file (no auto-clean)
+=== TEST 18: read buffered body to memory and reset it to a new file (no auto-clean)
 --- config
     client_body_in_file_only off;
 
@@ -727,7 +745,13 @@ hello, world"]
     }
 --- user_files
 >>> myscript.lua
-    local data, data2 = ngx.req.get_post_args(), {}
+    local data, err = ngx.req.get_post_args()
+    if err then
+        ngx.log(ngx.ERR, "err: ", err)
+        return ngx.exit(500)
+    end
+
+    local data2 = {}
     for k, v in pairs(data) do
         if type(v) == "table" then
             for i, val in ipairs(v) do
@@ -892,6 +916,7 @@ body: hell
 --- no_error_log
 [error]
 [alert]
+--- skip_eval: 4:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -953,6 +978,7 @@ body file: hello
 [alert]
 --- error_log
 a client request body is buffered to a temporary file
+--- skip_eval: 5:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -979,9 +1005,9 @@ a client request body is buffered to a temporary file
 --- error_code: 500
 --- error_log eval
 qr/lua entry thread aborted: runtime error: content_by_lua\(nginx\.conf:\d+\):2: request body not read yet/
-
 --- no_error_log
 [alert]
+--- skip_eval: 4:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -1011,8 +1037,8 @@ body: hell
 --- no_error_log
 [error]
 [alert]
---- no_error_log
 a client request body is buffered to a temporary file
+--- skip_eval: 5:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -1235,8 +1261,8 @@ body: hello, my dear friend!
 --- no_error_log
 [error]
 [alert]
---- no_error_log
 a client request body is buffered to a temporary file
+--- skip_eval: 5:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -1376,8 +1402,8 @@ failed to get req socket: request body already exists
 --- no_error_log
 [error]
 [alert]
---- no_error_log
 a client request body is buffered to a temporary file
+--- skip_eval: 5:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -1399,6 +1425,7 @@ Expect: 100-Continue
 [alert]
 [error]
 http finalize request: 500, "/test?" a:1, c:0
+--- skip_eval: 3:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -1474,13 +1501,22 @@ probe syscall.fcntl {
 --- stap_out_unlike
 fcntl\(O_DIRECT\)
 
---- raw_response_headers_like
-.*?X-New: \S+/html/a\.txt\r
+--- raw_response_headers_like eval
+my $headers;
+
+if (defined $ENV{TEST_NGINX_USE_HTTP3}) {
+    $headers = qr#.*?x-new: \S+/html/a\.txt\r#;
+} else {
+    $headers = qr#.*?X-New: \S+/html/a\.txt\r#;
+}
+
+$headers;
 --- response_body
 Will you change this world?
 --- no_error_log
 [error]
 [alert]
+--- skip_eval: 6:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -1708,9 +1744,9 @@ content length: 5
 
 
 
-=== TEST 52: init & append & finish (client_body_buffer_size = 0)
+=== TEST 52: init & append & finish (client_body_buffer_size = 1)
 --- http_config
-    client_body_buffer_size 0;
+    client_body_buffer_size 1;
 --- config
     location /t {
         content_by_lua '

@@ -16,6 +16,7 @@ BEGIN {
         $ENV{MOCKEAGAIN} = 'w';
     }
 
+    delete($ENV{TEST_NGINX_USE_HTTP2});
     $ENV{TEST_NGINX_EVENT_TYPE} = 'poll';
     $ENV{MOCKEAGAIN_WRITE_TIMEOUT_PATTERN} = 'get helloworld';
 }
@@ -24,7 +25,7 @@ use Test::Nginx::Socket::Lua;
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 4 + 14);
+plan tests => repeat_each() * (blocks() * 4 + 8);
 
 our $HtmlDir = html_dir;
 
@@ -46,7 +47,7 @@ __DATA__
     location /t1 {
         rewrite_by_lua '
             local sock = ngx.socket.tcp()
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -63,7 +64,7 @@ GET /t1
 failed to connect: timeout
 --- error_log
 lua tcp socket connect timeout: 100
-lua tcp socket connect timed out
+lua tcp socket connect timed out, upstream: 127.0.0.2:12345(127.0.0.2)
 --- timeout: 10
 
 
@@ -79,7 +80,7 @@ lua tcp socket connect timed out
         rewrite_by_lua '
             local sock = ngx.socket.tcp()
             sock:settimeout(150)
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -114,7 +115,7 @@ lua tcp socket connect timeout: 150
         rewrite_by_lua '
             local sock = ngx.socket.tcp()
             sock:settimeout(nil)
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -149,7 +150,7 @@ lua tcp socket connect timeout: 102
         rewrite_by_lua '
             local sock = ngx.socket.tcp()
             sock:settimeout(0)
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -174,7 +175,7 @@ lua tcp socket connect timeout: 102
 
 
 
-=== TEST 5: sock:settimeout(-1) does not override lua_socket_connect_timeout
+=== TEST 5: -1 is bad timeout value
 --- config
     server_tokens off;
     lua_socket_connect_timeout 102ms;
@@ -185,7 +186,7 @@ lua tcp socket connect timeout: 102
         rewrite_by_lua '
             local sock = ngx.socket.tcp()
             sock:settimeout(-1)
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -198,14 +199,12 @@ lua tcp socket connect timeout: 102
     }
 --- request
 GET /t5
---- response_body
-failed to connect: timeout
+--- response_body_like chomp
+500 Internal Server Error
 --- error_log
-lua tcp socket connect timeout: 102
---- no_error_log
-[error]
-[alert]
+bad timeout value
 --- timeout: 10
+--- error_code: 500
 
 
 
@@ -371,7 +370,7 @@ lua tcp socket read timed out
 
 
 
-=== TEST 10: sock:settimeout(-1) does not override lua_socket_read_timeout
+=== TEST 10: -1 is bad timeout value
 --- config
     server_tokens off;
     lua_socket_read_timeout 102ms;
@@ -384,8 +383,6 @@ lua tcp socket read timed out
                 ngx.say("failed to connect: ", err)
                 return
             end
-
-            ngx.say("connected: ", ok)
 
             sock:settimeout(-1)
 
@@ -402,13 +399,12 @@ lua tcp socket read timed out
     }
 --- request
 GET /t
---- response_body
-connected: 1
-failed to receive: timeout
+--- response_body_like chomp
+500 Internal Server Error
 --- error_log
-lua tcp socket read timeout: 102
-lua tcp socket connect timeout: 60000
-lua tcp socket read timed out
+bad timeout value
+--- timeout: 10
+--- error_code: 500
 
 
 
@@ -574,7 +570,7 @@ lua tcp socket write timed out
 
 
 
-=== TEST 15: sock:settimeout(-1) does not override lua_socket_send_timeout
+=== TEST 15: -1 is bad timeout value
 --- config
     server_tokens off;
     lua_socket_send_timeout 102ms;
@@ -587,8 +583,6 @@ lua tcp socket write timed out
                 ngx.say("failed to connect: ", err)
                 return
             end
-
-            ngx.say("connected: ", ok)
 
             sock:settimeout(-1)
 
@@ -605,11 +599,9 @@ lua tcp socket write timed out
     }
 --- request
 GET /t
---- response_body
-connected: 1
-failed to send: timeout
+--- response_body_like chomp
+500 Internal Server Error
 --- error_log
-lua tcp socket send timeout: 102
-lua tcp socket connect timeout: 60000
-lua tcp socket write timed out
-
+bad timeout value
+--- timeout: 10
+--- error_code: 500

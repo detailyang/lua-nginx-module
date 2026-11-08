@@ -123,7 +123,7 @@ nil
 --- config
     location /re {
         content_by_lua '
-            it = ngx.re.gmatch("hello, 1234", "([0-9]+)", "a")
+            local it = ngx.re.gmatch("hello, 1234", "([0-9]+)", "a")
             ngx.say(it())
         ';
     }
@@ -418,7 +418,7 @@ hello
         content_by_lua '
             local a = {}
             for i = 1, 3 do
-                it = ngx.re.gmatch("hello, world", "[a-z]+")
+                local it = ngx.re.gmatch("hello, world", "[a-z]+")
                 it()
                 collectgarbage()
                 table.insert(a, {"hello", "world"})
@@ -440,6 +440,7 @@ done
     location /main {
         content_by_lua '
             package.loaded.foo = nil
+            collectgarbage()
 
             local res = ngx.location.capture("/t")
             if res.status == 200 then
@@ -481,9 +482,9 @@ end
     GET /main
 --- response_body
 matched
-sr failed: 500
---- error_log
-attempt to use ngx.re.gmatch iterator in a request that did not create it
+matched
+--- no_error_log
+[error]
 
 
 
@@ -517,7 +518,7 @@ matched: []
     location /re {
         content_by_lua '
             local it = ngx.re.gmatch("1234, 1234", "(?<first>[0-9]+)")
-            m = it()
+            local m = it()
             if m then
                 ngx.say(m[0])
                 ngx.say(m[1])
@@ -554,7 +555,7 @@ matched: []
         content_by_lua '
             local it = ngx.re.gmatch("1234, abcd, 1234", "(?<first>[0-9]+)|(?<second>[a-z]+)")
 
-            m = it()
+            local m = it()
             if m then
                 ngx.say(m[0])
                 ngx.say(m[1])
@@ -598,7 +599,7 @@ abcd
     location /re {
         content_by_lua '
             local it = ngx.re.gmatch("hello, 1234", "(?<first>[a-z]+), (?<first>[0-9]+)", "D")
-            m = it()
+            local m = it()
             if m then
                 ngx.say(m[0])
                 ngx.say(m[1])
@@ -697,8 +698,11 @@ not matched!
     }
 --- request
     GET /re
---- response_body
-error: pcre_compile() failed: missing ) in "(abc"
+--- response_body eval
+$Test::Nginx::Util::PcreVersion == 2 ?
+"error: pcre2_compile() failed: missing closing parenthesis in \"(abc\"\n"
+:
+"error: pcre_compile() failed: missing ) in \"(abc\"\n"
 --- no_error_log
 [error]
 
@@ -734,8 +738,11 @@ error: pcre_compile() failed: missing ) in "(abc"
     }
 --- request
 GET /t
---- response_body_like chop
-error: pcre_exec\(\) failed: -10
+--- response_body eval
+$Test::Nginx::Util::PcreVersion == 2 ?
+"error: pcre_exec\(\) failed: -4\n"
+:
+"error: pcre_exec\(\) failed: -10\n"
 
 --- no_error_log
 [error]
@@ -824,7 +831,59 @@ exec opts: 0
 >>> a.lua
 local re = [==[(?i:([\s'\"`´’‘\(\)]*)?([\d\w]+)([\s'\"`´’‘\(\)]*)?(?:=|<=>|r?like|sounds\s+like|regexp)([\s'\"`´’‘\(\)]*)?\2|([\s'\"`´’‘\(\)]*)?([\d\w]+)([\s'\"`´’‘\(\)]*)?(?:!=|<=|>=|<>|<|>|\^|is\s+not|not\s+like|not\s+regexp)([\s'\"`´’‘\(\)]*)?(?!\6)([\d\w]+))]==]
 
-s = string.rep([[ABCDEFG]], 10)
+local s = string.rep([[ABCDEFG]], 10)
+
+local start = ngx.now()
+
+local it, err = ngx.re.gmatch(s, re, "o")
+if not it then
+    ngx.say("failed to gen iterator: ", err)
+    return
+end
+
+local res, err = it()
+
+--[[
+ngx.update_time()
+local elapsed = ngx.now() - start
+ngx.say(elapsed, " sec elapsed.")
+]]
+
+if not res then
+    if err then
+        ngx.say("error: ", err)
+        return
+    end
+    ngx.say("failed to match")
+    return
+end
+
+--- request
+    GET /re
+--- response_body eval
+# lua_regex_match_limit uses pcre_extra->match_limit in the PCRE,
+# but PCRE2 replaces this with pcre2_set_match_limit interface,
+# which has different effects.
+$Test::Nginx::Util::PcreVersion == 2 ?
+"failed to match\n"
+:
+"error: pcre_exec() failed: -8\n"
+
+
+
+=== TEST 31: just not hit match limit
+--- http_config
+    lua_regex_match_limit 5100;
+--- config
+    location /re {
+        content_by_lua_file html/a.lua;
+    }
+
+--- user_files
+>>> a.lua
+local re = [==[(?i:([\s'\"`´’‘\(\)]*)?([\d\w]+)([\s'\"`´’‘\(\)]*)?(?:=|<=>|r?like|sounds\s+like|regexp)([\s'\"`´’‘\(\)]*)?\2|([\s'\"`´’‘\(\)]*)?([\d\w]+)([\s'\"`´’‘\(\)]*)?(?:!=|<=|>=|<>|<|>|\^|is\s+not|not\s+like|not\s+regexp)([\s'\"`´’‘\(\)]*)?(?!\6)([\d\w]+))]==]
+
+local s = string.rep([[ABCDEFG]], 10)
 
 local start = ngx.now()
 
@@ -854,51 +913,4 @@ end
 --- request
     GET /re
 --- response_body
-error: pcre_exec() failed: -8
-
-
-
-=== TEST 31: just not hit match limit
---- http_config
-    lua_regex_match_limit 5100;
---- config
-    location /re {
-        content_by_lua_file html/a.lua;
-    }
-
---- user_files
->>> a.lua
-local re = [==[(?i:([\s'\"`´’‘\(\)]*)?([\d\w]+)([\s'\"`´’‘\(\)]*)?(?:=|<=>|r?like|sounds\s+like|regexp)([\s'\"`´’‘\(\)]*)?\2|([\s'\"`´’‘\(\)]*)?([\d\w]+)([\s'\"`´’‘\(\)]*)?(?:!=|<=|>=|<>|<|>|\^|is\s+not|not\s+like|not\s+regexp)([\s'\"`´’‘\(\)]*)?(?!\6)([\d\w]+))]==]
-
-s = string.rep([[ABCDEFG]], 10)
-
-local start = ngx.now()
-
-local it, err = ngx.re.gmatch(s, re, "o")
-if not it then
-    ngx.say("failed to gen iterator: ", err)
-    return
-end
-
-res, err = it()
-
---[[
-ngx.update_time()
-local elapsed = ngx.now() - start
-ngx.say(elapsed, " sec elapsed.")
-]]
-
-if not res then
-    if err then
-        ngx.say("error: ", err)
-        return
-    end
-    ngx.say("failed to match")
-    return
-end
-
---- request
-    GET /re
---- response_body
 failed to match
-

@@ -11,6 +11,8 @@ repeat_each(2);
 plan tests => repeat_each() * (blocks() * 2);
 
 $ENV{TEST_NGINX_MEMCACHED_PORT} ||= 11211;
+# Isolate keys from other files and concurrent runs of this file.
+$ENV{TEST_NGINX_MEMCACHED_PREFIX} = "lua_nginx_024_access_subrequest_$$";
 
 #no_diff();
 #no_long_string();
@@ -27,7 +29,7 @@ __DATA__
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_DELETE });
 
             ngx.print(res.body)
@@ -54,7 +56,7 @@ DELETE
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_DELETE });
 
             ngx.print(res.body)
@@ -82,7 +84,7 @@ DELETE
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_POST });
 
             ngx.print(res.body)
@@ -105,7 +107,7 @@ POST
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_HEAD });
 
             ngx.print(res.body)
@@ -131,7 +133,7 @@ GET /lua
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_GET });
 
             ngx.print(res.body)
@@ -158,7 +160,7 @@ GET
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo")
+            local res = ngx.location.capture("/foo")
 
             ngx.print(res.body)
         ';
@@ -184,7 +186,7 @@ GET
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo", {})
+            local res = ngx.location.capture("/foo", {})
 
             ngx.print(res.body)
         ';
@@ -213,7 +215,7 @@ GET
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_PUT, body = "hello" });
 
             ngx.print(res.body)
@@ -241,7 +243,7 @@ hello
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_PUT, body = "hello" });
 
             ngx.print(res.body)
@@ -276,7 +278,7 @@ hello
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/other",
+            local res = ngx.location.capture("/other",
                 { method = ngx.HTTP_PUT, body = "hello" });
 
             ngx.print(res.body)
@@ -313,7 +315,7 @@ GET
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { method = ngx.HTTP_POST, body = "hello" });
 
             ngx.print(res.body)
@@ -330,22 +332,23 @@ hello
 
 === TEST 12: POST (with body, memc method)
 --- config
-    location /flush {
-        set $memc_cmd flush_all;
+    location /delete {
+        set $memc_cmd delete;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:12:/memc";
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /memc {
-        set $memc_key $echo_request_uri;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:12:$echo_request_uri";
         set $memc_exptime 600;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /lua {
         access_by_lua '
-            ngx.location.capture("/flush");
+            ngx.location.capture("/delete");
 
-            res = ngx.location.capture("/memc");
+            local res = ngx.location.capture("/memc");
             ngx.say("GET: " .. res.status);
 
             res = ngx.location.capture("/memc",
@@ -369,24 +372,25 @@ cached: hello
 
 === TEST 13: POST (with body, memc method)
 --- config
-    location /flush {
-        set $memc_cmd flush_all;
+    location /delete {
+        set $memc_cmd delete;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:13:/memc";
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /memc {
         set $memc_cmd "";
-        set $memc_key $echo_request_uri;
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:13:$echo_request_uri";
         set $memc_exptime 600;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /lua {
         access_by_lua '
-            ngx.location.capture("/flush",
+            ngx.location.capture("/delete",
                 { share_all_vars = true });
 
-            res = ngx.location.capture("/memc",
+            local res = ngx.location.capture("/memc",
                 { share_all_vars = true });
             ngx.say("GET: " .. res.status);
 
@@ -417,7 +421,7 @@ cached: hello
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = {} })
             ngx.print(res.body)
         ';
@@ -437,7 +441,7 @@ GET /lua
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = { ["fo="] = "=>" } })
             ngx.print(res.body)
         ';
@@ -458,7 +462,7 @@ fo%3D=%3D%3E
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = { ["fo="] = "=>",
                     ["="] = ":" } })
             ngx.print(res.body)
@@ -480,7 +484,7 @@ GET /lua
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = { foo = 3,
                     bar = "hello" } })
             ngx.print(res.body)
@@ -502,7 +506,7 @@ GET /lua
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = { [57] = "hi" } })
             ngx.print(res.body)
         ';
@@ -523,7 +527,7 @@ GET /lua
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo",
+            local res = ngx.location.capture("/foo",
                 { args = { "hi" } })
             ngx.print(res.body)
         ';
@@ -544,7 +548,7 @@ GET /lua
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo?a=3",
+            local res = ngx.location.capture("/foo?a=3",
                 { args = { b = 4 } })
             ngx.print(res.body)
         ';
@@ -565,7 +569,7 @@ a=3&b=4
 
     location /lua {
         access_by_lua '
-            res = ngx.location.capture("/foo?a=3",
+            local res = ngx.location.capture("/foo?a=3",
                 { args = "b=4" })
             ngx.print(res.body)
         ';
@@ -599,4 +603,3 @@ the nginx core requires the patch https://github.com/agentzh/ngx_openresty/blob/
     GET /t
 --- response_body
 done
-

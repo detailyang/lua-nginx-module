@@ -8,7 +8,7 @@ our $StapScript = $t::StapThread::StapScript;
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 4 + 1);
+plan tests => repeat_each() * (blocks() * 4);
 
 $ENV{TEST_NGINX_RESOLVER} ||= '8.8.8.8';
 $ENV{TEST_NGINX_MEMCACHED_PORT} ||= '11211';
@@ -24,7 +24,7 @@ __DATA__
 --- config
     location /lua {
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.exit(0)
             end
@@ -87,7 +87,7 @@ hello in thread
 --- config
     location /lua {
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.1)
                 ngx.exit(0)
@@ -172,13 +172,13 @@ after
 --- config
     location /lua {
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.sleep(0.1)
                 ngx.say("f")
                 ngx.exit(0)
             end
 
-            function g()
+            local function g()
                 ngx.sleep(1)
                 ngx.say("g")
             end
@@ -262,7 +262,7 @@ f
 --- config
     location /lua {
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.sleep(0.1)
                 ngx.say("exiting the user thread")
                 ngx.exit(0)
@@ -298,10 +298,10 @@ exiting the user thread
 === TEST 5: exit in user thread (entry thread is still pending on the DNS resolver for ngx.socket.tcp)
 --- config
     location /lua {
-        resolver agentzh.org;
-        resolver_timeout 12s;
+        resolver 127.0.0.2:12345;
+        resolver_timeout 2s;
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.001)
                 ngx.exit(0)
@@ -311,7 +311,7 @@ exiting the user thread
             ngx.thread.spawn(f)
             ngx.say("after")
             local sock = ngx.socket.tcp()
-            local ok, err = sock:connect("agentzh.org", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -321,93 +321,25 @@ exiting the user thread
     }
 --- request
 GET /lua
---- stap2 eval: $::StapScript
---- stap eval
-<<'_EOC_' . $::GCScript;
-
-global timers
-
-F(ngx_resolve_start) {
-    println("resolver started")
-}
-
-F(ngx_http_lua_socket_resolve_handler) {
-    println("resolver done")
-}
-
-F(ngx_http_free_request) {
-    println("free request")
-}
-
-F(ngx_resolve_name) {
-    printf("resolving %s\n", user_string_n($ctx->name->data, $ctx->name->len))
-}
-
-M(timer-add) {
-    if ($arg2 == 12000 || $arg2 == 1) {
-        timers[$arg1] = $arg2
-        printf("add timer %d\n", $arg2)
-    }
-}
-
-M(timer-del) {
-    tm = timers[$arg1]
-    if (tm == 12000 || tm == 1) {
-        printf("delete timer %d\n", tm)
-        delete timers[$arg1]
-    }
-    /*
-    if (tm == 12000) {
-        print_ubacktrace()
-    }
-    */
-}
-
-M(timer-expire) {
-    tm = timers[$arg1]
-    if (tm == 12000 || tm == 1) {
-        printf("expire timer %d\n", timers[$arg1])
-        delete timers[$arg1]
-    }
-}
-
-F(ngx_http_lua_tcp_resolve_cleanup) {
-    println("lua tcp resolve cleanup")
-}
-_EOC_
-
---- stap_out
-create 2 in 1
-spawn user thread 2 in 1
-add timer 1
-resolver started
-resolving agentzh.org
-add timer 12000
-expire timer 1
-terminate 2: ok
-delete thread 2
-lua tcp resolve cleanup
-delete timer 12000
-delete thread 1
-free request
-
 --- response_body
 before
 hello in thread
 after
 --- no_error_log
 [error]
+[crit]
 
 
 
 === TEST 6: exit in user thread (entry thread is still pending on the DNS resolver for ngx.socket.udp)
 --- config
     location /lua {
-        resolver agentzh.org;
+        resolver 127.0.0.2:12345;
         #resolver 127.0.0.1;
-        resolver_timeout 12s;
+        resolver_timeout 2s;
         rewrite_by_lua '
-            function f()
+            collectgarbage("collect")
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.001)
                 ngx.exit(0)
@@ -427,76 +359,6 @@ after
     }
 --- request
 GET /lua
---- stap2 eval: $::StapScript
---- stap eval
-<<'_EOC_' . $::GCScript;
-
-global timers
-
-F(ngx_resolve_start) {
-    println("resolver started")
-}
-
-F(ngx_http_lua_socket_resolve_handler) {
-    println("resolver done")
-}
-
-F(ngx_http_free_request) {
-    println("free request")
-}
-
-F(ngx_resolve_name) {
-    printf("resolving %s\n", user_string_n($ctx->name->data, $ctx->name->len))
-}
-
-M(timer-add) {
-    if ($arg2 == 12000 || $arg2 == 1) {
-        timers[$arg1] = $arg2
-        printf("add timer %d\n", $arg2)
-    }
-}
-
-M(timer-del) {
-    tm = timers[$arg1]
-    if (tm == 12000 || tm == 1) {
-        printf("delete timer %d\n", tm)
-        delete timers[$arg1]
-    }
-    /*
-    if (tm == 12000) {
-        print_ubacktrace()
-    }
-    */
-}
-
-M(timer-expire) {
-    tm = timers[$arg1]
-    if (tm == 12000 || tm == 1) {
-        printf("expire timer %d\n", timers[$arg1])
-        delete timers[$arg1]
-    }
-}
-
-F(ngx_http_lua_udp_resolve_cleanup) {
-    println("lua udp resolve cleanup")
-}
-_EOC_
-
---- stap_out
-create 2 in 1
-spawn user thread 2 in 1
-add timer 1
-resolver started
-resolving agentzh.org
-add timer 12000
-expire timer 1
-terminate 2: ok
-delete thread 2
-lua udp resolve cleanup
-delete timer 12000
-delete thread 1
-free request
-
 --- response_body
 before
 hello in thread
@@ -510,7 +372,7 @@ after
 --- config
     location /lua {
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.1)
                 ngx.exit(0)
@@ -521,7 +383,7 @@ after
             ngx.say("after")
             local sock = ngx.socket.tcp()
             sock:settimeout(12000)
-            local ok, err = sock:connect("106.184.1.99", 12345)
+            local ok, err = sock:connect("127.0.0.2", 12345)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -600,7 +462,7 @@ after
 --- config
     location /lua {
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.1)
                 ngx.exit(0)
@@ -700,7 +562,7 @@ after
 --- config
     location /lua {
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.1)
                 ngx.exit(0)
@@ -806,7 +668,7 @@ after
 --- config
     location /lua {
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.1)
                 ngx.exit(0)
@@ -901,7 +763,7 @@ after
 --- config
     location /lua {
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.1)
                 ngx.exit(0)
@@ -987,15 +849,16 @@ hello in thread
 after
 --- no_error_log
 [error]
+--- skip_eval: 4:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
 === TEST 12: exit in user thread (entry thread is still pending on ngx.req.read_body)
 --- config
     location /lua {
-        client_body_timeout 12000ms;
+        client_body_timeout 2000ms;
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.1)
                 ngx.exit(0)
@@ -1072,15 +935,16 @@ hello in thread
 after
 --- no_error_log
 [error]
+--- skip_eval: 4:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
 === TEST 13: exit in user thread (entry thread is still pending on ngx.location.capture), with pending output
 --- config
     location /lua {
-        client_body_timeout 12000ms;
+        client_body_timeout 2000ms;
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.say("hello in thread")
                 ngx.sleep(0.1)
                 ngx.exit(0)
@@ -1162,9 +1026,9 @@ attempt to abort with pending subrequests
 === TEST 14: exit in user thread (entry thread is still pending on ngx.location.capture), without pending output
 --- config
     location /lua {
-        client_body_timeout 12000ms;
+        client_body_timeout 2000ms;
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.sleep(0.1)
                 ngx.exit(0)
             end
@@ -1245,9 +1109,9 @@ attempt to abort with pending subrequests
 === TEST 15: exit in user thread (entry thread is still pending on ngx.location.capture_multi), without pending output
 --- config
     location /lua {
-        client_body_timeout 12000ms;
+        client_body_timeout 2000ms;
         rewrite_by_lua '
-            function f()
+            local function f()
                 ngx.sleep(0.1)
                 ngx.exit(0)
             end

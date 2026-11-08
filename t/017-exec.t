@@ -4,9 +4,11 @@ use Test::Nginx::Socket::Lua;
 
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 2 + 4);
+plan tests => repeat_each() * (blocks() * 2 + 8);
 
 $ENV{TEST_NGINX_MEMCACHED_PORT} ||= 11211;
+# Isolate keys from other files and concurrent runs of this file.
+$ENV{TEST_NGINX_MEMCACHED_PREFIX} = "lua_nginx_017_exec_$$";
 
 #no_diff();
 #no_shuffle();
@@ -211,14 +213,16 @@ hello
     }
 
     location /a {
-        set $memc_key 'hello world';
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:11:hello world";
+        set $memc_exptime 600;
         set $memc_value 'hello hello hello world world world';
         set $memc_cmd set;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location /b {
-        set $memc_key 'hello world';
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:11:hello world";
+        set $memc_exptime 600;
         set $memc_cmd get;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
@@ -267,14 +271,16 @@ hello
     }
 
     location /a {
-        set $memc_key 'hello world';
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:13:hello world";
+        set $memc_exptime 600;
         set $memc_value 'hello hello hello world world world';
         set $memc_cmd set;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
 
     location @b {
-        set $memc_key 'hello world';
+        set $memc_key "$TEST_NGINX_MEMCACHED_PREFIX:13:hello world";
+        set $memc_exptime 600;
         set $memc_cmd get;
         memc_pass 127.0.0.1:$TEST_NGINX_MEMCACHED_PORT;
     }
@@ -382,7 +388,7 @@ hello
 --- config
     location /lua {
         content_by_lua '
-            function f ()
+            local function f ()
                 ngx.exec("/hi")
             end
 
@@ -524,7 +530,7 @@ hello
 --- config
     location /main {
         rewrite_by_lua '
-            res = ngx.location.capture("/test_loc");
+            local res = ngx.location.capture("/test_loc");
             ngx.print("hello, ", res.body)
         ';
         content_by_lua return;
@@ -573,3 +579,24 @@ hello, bah
 --- no_error_log
 [error]
 
+
+
+=== TEST 25: pipelined requests
+--- config
+    location /t {
+        content_by_lua_block {
+            ngx.exec("@foo")
+        }
+    }
+
+    location @foo {
+        return 200;
+    }
+--- pipelined_requests eval
+["GET /t", "GET /t"]
+--- error_code eval
+[200, 200]
+--- response_body eval
+["", ""]
+--- no_error_log
+[error]

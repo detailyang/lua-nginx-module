@@ -63,7 +63,9 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
     }
 
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
+                               | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
+                               | NGX_HTTP_LUA_CONTEXT_PRECONTENT
                                | NGX_HTTP_LUA_CONTEXT_CONTENT);
 
     if (ctx->acquired_raw_req_socket) {
@@ -93,6 +95,9 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
 
         switch (type) {
             case LUA_TNUMBER:
+                size += ngx_http_lua_get_num_len(L, i);
+                break;
+
             case LUA_TSTRING:
 
                 lua_tolstring(L, i, &len);
@@ -173,6 +178,9 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
         type = lua_type(L, i);
         switch (type) {
             case LUA_TNUMBER:
+                b->last = ngx_http_lua_write_num(L, i, b->last);
+                break;
+
             case LUA_TSTRING:
                 p = lua_tolstring(L, i, &len);
                 b->last = ngx_copy(b->last, (u_char *) p, len);
@@ -238,6 +246,11 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
         return 2;
     }
 
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "%s has %sbusy bufs",
+                   newline ? "lua say response" : "lua print response",
+                   ctx->busy_bufs != NULL ? "" : "no ");
+
     dd("downstream write: %d, buf len: %d", (int) rc,
        (int) (b->last - b->pos));
 
@@ -301,8 +314,10 @@ ngx_http_lua_calc_strlen_in_table(lua_State *L, int index, int arg_i,
 
         switch (type) {
             case LUA_TNUMBER:
-            case LUA_TSTRING:
+                size += ngx_http_lua_get_num_len(L, -1);
+                break;
 
+            case LUA_TSTRING:
                 lua_tolstring(L, -1, &len);
                 size += len;
                 break;
@@ -396,6 +411,9 @@ ngx_http_lua_copy_str_in_table(lua_State *L, int index, u_char *dst)
         type = lua_type(L, -1);
         switch (type) {
             case LUA_TNUMBER:
+                dst = ngx_http_lua_write_num(L, -1, dst);
+                break;
+
             case LUA_TSTRING:
                 p = (u_char *) lua_tolstring(L, -1, &len);
                 dst = ngx_copy(dst, p, len);
@@ -483,7 +501,9 @@ ngx_http_lua_ngx_flush(lua_State *L)
     }
 
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
+                               | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
+                               | NGX_HTTP_LUA_CONTEXT_PRECONTENT
                                | NGX_HTTP_LUA_CONTEXT_CONTENT);
 
     if (ctx->acquired_raw_req_socket) {
@@ -528,7 +548,7 @@ ngx_http_lua_ngx_flush(lua_State *L)
     }
 #endif
 
-    cl = ngx_http_lua_get_flush_chain(r, ctx);
+    cl = ngx_http_lua_get_flush_chain(r);
     if (cl == NULL) {
         return luaL_error(L, "no memory");
     }
@@ -548,7 +568,8 @@ ngx_http_lua_ngx_flush(lua_State *L)
 
     wev = r->connection->write;
 
-    if (wait && (r->connection->buffered & NGX_HTTP_LOWLEVEL_BUFFERED
+    if (wait && (r->connection->buffered
+                 & (NGX_HTTP_LOWLEVEL_BUFFERED | NGX_LOWLEVEL_BUFFERED)
                  || wev->delayed))
     {
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -636,7 +657,9 @@ ngx_http_lua_ngx_eof(lua_State *L)
     }
 
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
+                               | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
+                               | NGX_HTTP_LUA_CONTEXT_PRECONTENT
                                | NGX_HTTP_LUA_CONTEXT_CONTENT);
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -698,19 +721,19 @@ ngx_http_lua_ngx_send_headers(lua_State *L)
     }
 
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
+                               | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
+                               | NGX_HTTP_LUA_CONTEXT_PRECONTENT
                                | NGX_HTTP_LUA_CONTEXT_CONTENT);
 
-    if (!r->header_sent && !ctx->header_sent) {
-        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                       "lua send headers");
+    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "lua send headers");
 
-        rc = ngx_http_lua_send_header_if_needed(r, ctx);
-        if (rc == NGX_ERROR || rc > NGX_OK) {
-            lua_pushnil(L);
-            lua_pushliteral(L, "nginx output filter error");
-            return 2;
-        }
+    rc = ngx_http_lua_send_header_if_needed(r, ctx);
+    if (rc == NGX_ERROR || rc > NGX_OK) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "nginx output filter error");
+        return 2;
     }
 
     lua_pushinteger(L, 1);
@@ -724,6 +747,7 @@ ngx_http_lua_flush_resume_helper(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
     int                          n;
     lua_State                   *vm;
     ngx_int_t                    rc;
+    ngx_uint_t                   nreqs;
     ngx_connection_t            *c;
 
     c = r->connection;
@@ -748,18 +772,20 @@ ngx_http_lua_flush_resume_helper(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
     }
 
     vm = ngx_http_lua_get_lua_vm(r, ctx);
+    nreqs = c->requests;
+
     rc = ngx_http_lua_run_thread(vm, r, ctx, n);
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua run thread returned %d", rc);
 
     if (rc == NGX_AGAIN) {
-        return ngx_http_lua_run_posted_threads(c, vm, r, ctx);
+        return ngx_http_lua_run_posted_threads(c, vm, r, ctx, nreqs);
     }
 
     if (rc == NGX_DONE) {
         ngx_http_lua_finalize_request(r, NGX_DONE);
-        return ngx_http_lua_run_posted_threads(c, vm, r, ctx);
+        return ngx_http_lua_run_posted_threads(c, vm, r, ctx, nreqs);
     }
 
     /* rc == NGX_ERROR || rc >= NGX_OK */

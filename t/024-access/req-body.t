@@ -122,6 +122,7 @@ Expect: 100-Continue
 [alert]
 [error]
 http finalize request: 500, "/test?" a:1, c:0
+--- skip_eval: 3:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -218,4 +219,3 @@ hiya, world"]
 --- no_error_log
 [error]
 [alert]
-

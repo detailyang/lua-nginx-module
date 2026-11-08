@@ -32,7 +32,7 @@ __DATA__
         server_name   test.com;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
-        ssl_protocols SSLv3;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -40,6 +40,7 @@ __DATA__
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -77,16 +78,21 @@ __DATA__
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log
 lua ssl server name: "test.com"
-ssl_session_store_by_lua_block:1: ssl session store by lua is running!
 
 --- no_error_log
 [error]
 [alert]
+--- grep_error_log eval: qr/ssl_session_store_by_lua\(nginx.conf:\d+\):.*?,|\bssl session store: connection reusable: \d+|\breusable connection: \d+/
+--- grep_error_log_out eval
+qr/^reusable connection: 0
+ssl session store: connection reusable: 0
+ssl_session_store_by_lua\(nginx\.conf:25\):1: ssl session store by lua is running!,
+/m,
 
 
 
@@ -102,7 +108,7 @@ ssl_session_store_by_lua_block:1: ssl session store by lua is running!
         server_name   test.com;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
-        ssl_protocols SSLv3;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -110,6 +116,7 @@ ssl_session_store_by_lua_block:1: ssl session store by lua is running!
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -147,7 +154,7 @@ ssl_session_store_by_lua_block:1: ssl session store by lua is running!
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log
@@ -177,7 +184,7 @@ API disabled in the context of ssl_session_store_by_lua*
         server_name   test.com;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
-        ssl_protocols SSLv3;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -185,6 +192,7 @@ API disabled in the context of ssl_session_store_by_lua*
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -222,7 +230,7 @@ API disabled in the context of ssl_session_store_by_lua*
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log
@@ -248,9 +256,9 @@ my timer run!
             return
         end
 
-        local bytes, err = sock:send("flush_all\\r\\n")
+        local bytes, err = sock:send("get __nil\\r\\n")
         if not bytes then
-            ngx.log(ngx.ERR, "failed to send flush_all command: ", err)
+            ngx.log(ngx.ERR, "failed to send get command: ", err)
             return
         end
 
@@ -267,9 +275,9 @@ my timer run!
         listen unix:$TEST_NGINX_HTML_DIR/nginx.sock ssl;
         server_name   test.com;
 
-        ssl_protocols SSLv3;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -277,6 +285,7 @@ my timer run!
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -314,7 +323,7 @@ my timer run!
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log
@@ -335,9 +344,9 @@ API disabled in the context of ssl_session_store_by_lua*
     server {
         listen unix:$TEST_NGINX_HTML_DIR/nginx.sock ssl;
         server_name test.com;
-        ssl_protocols SSLv3;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -346,6 +355,7 @@ API disabled in the context of ssl_session_store_by_lua*
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
     lua_ssl_verify_depth 3;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -385,7 +395,7 @@ API disabled in the context of ssl_session_store_by_lua*
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log
@@ -407,9 +417,9 @@ ngx.exit does not yield and the error code is eaten.
     server {
         listen unix:$TEST_NGINX_HTML_DIR/nginx.sock ssl;
         server_name test.com;
-        ssl_protocols SSLv3;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -418,6 +428,7 @@ ngx.exit does not yield and the error code is eaten.
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
     lua_ssl_verify_depth 3;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -457,7 +468,7 @@ ngx.exit does not yield and the error code is eaten.
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log
@@ -480,9 +491,9 @@ ssl_session_store_by_lua*: handler return value: 0, sess new cb exit code: 0
     server {
         listen unix:$TEST_NGINX_HTML_DIR/nginx.sock ssl;
         server_name test.com;
-        ssl_protocols SSLv3;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -491,6 +502,7 @@ ssl_session_store_by_lua*: handler return value: 0, sess new cb exit code: 0
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
     lua_ssl_verify_depth 3;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -527,11 +539,11 @@ ssl_session_store_by_lua*: handler return value: 0, sess new cb exit code: 0
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log
-failed to run session_store_by_lua*: ssl_session_store_by_lua_block:2: bad bad bad
+failed to run session_store_by_lua*: ssl_session_store_by_lua(nginx.conf:25):2: bad bad bad
 
 --- no_error_log
 should never reached here
@@ -548,9 +560,9 @@ should never reached here
     server {
         listen unix:$TEST_NGINX_HTML_DIR/nginx.sock ssl;
         server_name test.com;
-        ssl_protocols SSLv3;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -559,6 +571,7 @@ should never reached here
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
     lua_ssl_verify_depth 3;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -595,7 +608,7 @@ should never reached here
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log
@@ -621,7 +634,7 @@ get_phase: ssl_session_store
         }
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
-        ssl_protocols SSLv3;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -629,6 +642,7 @@ get_phase: ssl_session_store
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -666,14 +680,14 @@ get_phase: ssl_session_store
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log eval
 [
 'lua ssl server name: "test.com"',
 qr/elapsed in ssl cert by lua: 0.(?:09|1[01])\d+,/,
-'ssl_session_store_by_lua_block:1: ssl store session by lua is running!',
+'ssl_session_store_by_lua(nginx.conf:25):1: ssl store session by lua is running!',
 ]
 
 --- no_error_log
@@ -690,7 +704,7 @@ qr/elapsed in ssl cert by lua: 0.(?:09|1[01])\d+,/,
         server_name   test.com;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
-        ssl_protocols SSLv3;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -698,6 +712,7 @@ qr/elapsed in ssl cert by lua: 0.(?:09|1[01])\d+,/,
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -739,7 +754,7 @@ print("ssl store session by lua is running!")
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log
@@ -760,7 +775,6 @@ a.lua:1: ssl store session by lua is running!
         ssl_session_store_by_lua_block {
             print("handler in test.com")
         }
-        ssl_protocols SSLv3;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
 
@@ -770,7 +784,6 @@ a.lua:1: ssl store session by lua is running!
     server {
         listen unix:$TEST_NGINX_HTML_DIR/nginx.sock ssl;
         server_name test.com;
-        ssl_protocols SSLv3;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
 
@@ -781,6 +794,7 @@ a.lua:1: ssl store session by lua is running!
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
     lua_ssl_verify_depth 3;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -817,7 +831,7 @@ a.lua:1: ssl store session by lua is running!
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- no_error_log
@@ -836,7 +850,7 @@ qr/\[emerg\] .*? "ssl_session_store_by_lua_block" directive is not allowed here 
         server_name   test.com;
         ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
-        ssl_protocols SSLv3;
+        ssl_session_tickets off;
 
         server_tokens off;
     }
@@ -851,6 +865,7 @@ qr/\[emerg\] .*? "ssl_session_store_by_lua_block" directive is not allowed here 
     server_tokens off;
     resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
+    lua_ssl_protocols TLSv1.2;
 
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -888,13 +903,76 @@ qr/\[emerg\] .*? "ssl_session_store_by_lua_block" directive is not allowed here 
 GET /t
 --- response_body
 connected: 1
-ssl handshake: userdata
+ssl handshake: cdata
 close: 1 nil
 
 --- error_log
 lua ssl server name: "test.com"
-ssl_session_store_by_lua_block:1: ssl session store by lua is running!
+ssl_session_store_by_lua(nginx.conf:25):1: ssl session store by lua is running!
 
 --- no_error_log
 [error]
 [alert]
+
+
+
+=== TEST 13: ssl_session_store_by_lua* is skipped when using TLSv1.3
+--- skip_openssl: 6: < 1.1.1
+--- http_config
+    ssl_session_store_by_lua_block { ngx.log(ngx.ERR, "ssl_session_store_by_lua* is running!") }
+    server {
+        listen unix:$TEST_NGINX_HTML_DIR/nginx.sock ssl;
+        server_name test.com;
+        ssl_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
+        ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
+        ssl_session_tickets off;
+        ssl_protocols TLSv1.3;
+        server_tokens off;
+    }
+--- config
+    server_tokens off;
+    lua_ssl_trusted_certificate $TEST_NGINX_CERT_DIR/cert/test.crt;
+    lua_ssl_protocols TLSv1.3;
+
+    location /t {
+        content_by_lua_block {
+            do
+                local sock = ngx.socket.tcp()
+
+                sock:settimeout(5000)
+
+                local ok, err = sock:connect("unix:$TEST_NGINX_HTML_DIR/nginx.sock")
+                if not ok then
+                    ngx.say("failed to connect: ", err)
+                    return
+                end
+
+                ngx.say("connected: ", ok)
+
+                local sess, err = sock:sslhandshake(nil, "test.com", true)
+                if not sess then
+                    ngx.say("failed to do SSL handshake: ", err)
+                    return
+                end
+
+                ngx.say("ssl handshake: ", type(sess))
+
+                local ok, err = sock:close()
+                ngx.say("close: ", ok, " ", err)
+            end  -- do
+            -- collectgarbage()
+        }
+    }
+--- request
+GET /t
+--- response_body
+connected: 1
+ssl handshake: cdata
+close: 1 nil
+--- error_log eval
+qr/ssl_session_store_by_lua\*: skipped since TLS version >= 1\.3 \(\d+\)/
+--- no_error_log
+[error]
+[alert]
+[emerg]
+--- skip_eval: 6:$ENV{TEST_NGINX_USE_HTTP3}

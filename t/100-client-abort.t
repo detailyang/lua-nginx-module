@@ -1,6 +1,14 @@
 # vim:set ft= ts=4 sw=4 et fdm=marker:
 
-use Test::Nginx::Socket::Lua;
+BEGIN {
+    if ($ENV{TEST_NGINX_USE_HTTP3}) {
+        $SkipReason = "client abort detect does not support in http3";
+    } elsif ($ENV{TEST_NGINX_USE_HTTP2}) {
+        $SkipReason = "client abort detect does not support in http2";
+    }
+}
+
+use Test::Nginx::Socket::Lua $SkipReason ? (skip_all => $SkipReason) : ();
 use t::StapThread;
 
 our $GCScript = <<_EOC_;
@@ -195,7 +203,7 @@ bad things happen
 
     location = /sub {
         proxy_ignore_client_abort on;
-        proxy_pass http://agentzh.org:12345/;
+        proxy_pass http://127.0.0.2:12345/;
     }
 
     location = /sleep {
@@ -236,7 +244,7 @@ client prematurely closed connection
 
     location = /sub {
         proxy_ignore_client_abort off;
-        proxy_pass http://agentzh.org:12345/;
+        proxy_pass http://127.0.0.2:12345/;
     }
 --- request
 GET /t
@@ -540,7 +548,7 @@ client prematurely closed connection
                 return
             end
 
-            ok, err = sock:connect("127.0.0.1", $TEST_NGINX_REDIS_PORT)
+            local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_REDIS_PORT)
             if not ok then
                 ngx.log(ngx.ERR, "failed to connect: ", err)
                 return
@@ -947,6 +955,7 @@ GET /t
 [alert]
 --- error_log
 say failed: nginx output filter error
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -975,6 +984,7 @@ GET /t
 [alert]
 --- error_log
 print failed: nginx output filter error
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -1034,6 +1044,7 @@ GET /t
 [alert]
 --- error_log
 flush succeeded
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -1064,4 +1075,4 @@ GET /t
 eof succeeded
 --- error_log
 eof failed: nginx output filter error
-
+--- skip_eval: 4:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)

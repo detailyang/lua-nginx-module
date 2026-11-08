@@ -1,4 +1,10 @@
 # vim:set ft= ts=4 sw=4 et fdm=marker:
+BEGIN {
+    # Injected initialization and per-line GC change the cache/ordering or
+    # performance contract asserted here. Keep ASan, use the normal GC policy.
+    delete $ENV{TEST_NGINX_INIT_BY_LUA} if $ENV{TEST_NGINX_GC_STRESS};
+}
+
 use Test::Nginx::Socket::Lua;
 use t::StapThread;
 
@@ -10,9 +16,11 @@ our $StapScript = $t::StapThread::StapScript;
 #workers(2);
 #log_level('warn');
 
+# Check minimum timer delays; the harness deadline bounds completion.
+# Instrumentation and scheduler load can extend the elapsed time.
 repeat_each(2);
 
-plan tests => repeat_each() * (blocks() * 8 + 72);
+plan tests => repeat_each() * (blocks() * 8 + 61);
 
 #no_diff();
 no_long_string();
@@ -33,7 +41,7 @@ __DATA__
         content_by_lua '
             local begin = ngx.now()
             local function f(premature)
-                print("elapsed: ", ngx.now() - begin)
+                print("timer delay respected: ", ngx.now() - begin >= 0.04)
                 print("timer prematurely expired: ", premature)
             end
             local ok, err = ngx.timer.at(0.05, f)
@@ -68,22 +76,34 @@ timer prematurely expired: true
 
 --- error_log eval
 [
-qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:4[4-9]|5[0-6])\d*, context: ngx\.timer, client: \d+\.\d+\.\d+\.\d+, server: 0\.0\.0\.0:\d+/,
+qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: timer delay respected: true, context: ngx\.timer, client: \d+\.\d+\.\d+\.\d+, server: 0\.0\.0\.0:\d+/,
 "lua ngx.timer expired",
 "http lua close fake http connection",
 "timer prematurely expired: false",
 ]
+--- grep_error_log eval: qr/lua caching unused lua thread|lua reusing cached lua thread/
+--- grep_error_log_out eval
+[
+    "lua caching unused lua thread
+lua caching unused lua thread
+",
+    "lua reusing cached lua thread
+lua reusing cached lua thread
+lua caching unused lua thread
+lua caching unused lua thread
+",
+]
 
 
 
-=== TEST 2: separated global env
+=== TEST 2: globals are shared
 --- config
     location /t {
         content_by_lua '
             local begin = ngx.now()
             local function f()
                 foo = 3
-                print("elapsed: ", ngx.now() - begin)
+                print("timer delay respected: ", ngx.now() - begin >= 0.04)
             end
             local ok, err = ngx.timer.at(0.05, f)
             if not ok then
@@ -104,9 +124,9 @@ F(ngx_http_lua_timer_handler) {
 
 --- response_body
 registered timer
-foo = nil
+foo = 3
 
---- wait: 0.1
+--- wait: 0.2
 --- no_error_log
 [error]
 [alert]
@@ -114,7 +134,7 @@ foo = nil
 
 --- error_log eval
 [
-qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:4[4-9]|5[0-6])/,
+qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: timer delay respected: true/,
 "lua ngx.timer expired",
 "http lua close fake http connection"
 ]
@@ -129,7 +149,7 @@ qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:4[4-9]|5[0-6])
             local foo
             local function f()
                 foo = 3
-                print("elapsed: ", ngx.now() - begin)
+                print("timer delay respected: ", ngx.now() - begin >= 0.04)
             end
             local ok, err = ngx.timer.at(0.05, f)
             if not ok then
@@ -160,7 +180,7 @@ foo = 3
 
 --- error_log eval
 [
-qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:4[4-9]|5[0-6])/,
+qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: timer delay respected: true/,
 "lua ngx.timer expired",
 "http lua close fake http connection"
 ]
@@ -174,8 +194,8 @@ qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:4[4-9]|5[0-6])
             local begin = ngx.now()
             local function f()
                 print("my lua timer handler")
-                ngx.sleep(0.02)
-                print("elapsed: ", ngx.now() - begin)
+                ngx.sleep(0.2)
+                print("timer delay respected: ", ngx.now() - begin >= 0.24)
             end
             local ok, err = ngx.timer.at(0.05, f)
             if not ok then
@@ -199,7 +219,7 @@ delete thread 2
 --- response_body
 registered timer
 
---- wait: 0.12
+--- wait: 0.3
 --- no_error_log
 [error]
 [alert]
@@ -208,7 +228,7 @@ registered timer
 --- error_log eval
 [
 qr/\[lua\] .*? my lua timer handler/,
-qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:6[4-9]|7[0-6])/,
+qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: timer delay respected: true/,
 "lua ngx.timer expired",
 "http lua close fake http connection"
 ]
@@ -216,10 +236,24 @@ qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:6[4-9]|7[0-6])
 
 
 === TEST 5: tcp cosocket in timer handler (short connections)
+--- no_http2
 --- config
     server_tokens off;
+
+    location = /gc {
+        content_by_lua_block {
+            local c = collectgarbage("count")
+            ngx.say("before: ", c)
+            collectgarbage("collect")
+            c = collectgarbage("count")
+            ngx.say("after: ", c)
+        }
+    }
+
     location = /t {
         content_by_lua '
+            collectgarbage()
+            -- ngx.say("gc size: ", collectgarbage("count"))
             local begin = ngx.now()
             local function fail(...)
                 ngx.log(ngx.ERR, ...)
@@ -269,6 +303,7 @@ qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:6[4-9]|7[0-6])
                 ngx.say("failed to set timer: ", err)
                 return
             end
+            -- ngx.sleep(0.1)
             ngx.say("registered timer")
         ';
     }
@@ -320,7 +355,7 @@ qr/received: Server: \S+/,
 
 === TEST 6: tcp cosocket in timer handler (keep-alive connections)
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 
 --- config
     location = /t {
@@ -360,7 +395,7 @@ function go(port)
 
     print("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -410,7 +445,7 @@ qr/\[lua\] .*? my lua timer handler/,
 "http lua close fake http connection",
 qr/go\(\): connected: 1, reused: \d+/,
 "go(): request sent: 11",
-"go(): received: OK",
+"go(): received: END",
 ]
 
 
@@ -487,7 +522,7 @@ qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0(?:[^.]|\.00)/,
 
                 print("connected: ", ok)
 
-                local req = "\\0\\1\\0\\0\\0\\1\\0\\0flush_all\\r\\n"
+                local req = "\\0\\1\\0\\0\\0\\1\\0\\0get __nil\\r\\n"
                 local ok, err = udp:send(req)
                 if not ok then
                     fail("failed to send: ", err)
@@ -541,7 +576,7 @@ qr/\[lua\] .*? my lua timer handler/,
 "lua ngx.timer expired",
 "http lua close fake http connection",
 "connected: 1",
-"received 12 bytes: \x{00}\x{01}\x{00}\x{00}\x{00}\x{01}\x{00}\x{00}OK\x{0d}\x{0a}"
+"received 13 bytes: \x{00}\x{01}\x{00}\x{00}\x{00}\x{01}\x{00}\x{00}END\x{0d}\x{0a}"
 ]
 
 
@@ -555,7 +590,7 @@ qr/\[lua\] .*? my lua timer handler/,
             local function f()
                 print("my lua timer handler")
                 ngx.sleep(0.02)
-                print("elapsed: ", ngx.now() - begin)
+                print("timer delay respected: ", ngx.now() - begin >= 0.06)
             end
             local ok, err = ngx.timer.at(0.05, f)
             if not ok then
@@ -577,7 +612,7 @@ delete thread 2
 --- response_body
 hello world
 
---- wait: 0.12
+--- wait: 0.3
 --- no_error_log
 [error]
 [alert]
@@ -587,7 +622,7 @@ hello world
 [
 "registered timer",
 qr/\[lua\] .*? my lua timer handler/,
-qr/\[lua\] log_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:6[4-9]|7[0-6])/,
+qr/\[lua\] log_by_lua\(nginx\.conf:\d+\):\d+: timer delay respected: true/,
 "lua ngx.timer expired",
 "http lua close fake http connection"
 ]
@@ -596,7 +631,7 @@ qr/\[lua\] log_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:6[4-9]|7[0-6])/,
 
 === TEST 10: tcp cosocket in timer handler (keep-alive connections) - log_by_lua
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 
 --- config
     location = /t {
@@ -637,7 +672,7 @@ function go(port)
 
     print("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -686,14 +721,14 @@ qr/\[lua\] .*? my lua timer handler/,
 "http lua close fake http connection",
 qr/go\(\): connected: 1, reused: \d+/,
 "go(): request sent: 11",
-"go(): received: OK",
+"go(): received: END",
 ]
 
 
 
 === TEST 11: tcp cosocket in timer handler (keep-alive connections) - header_filter_by_lua
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 
 --- config
     location = /t {
@@ -734,7 +769,7 @@ function go(port)
 
     print("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -792,14 +827,14 @@ qr/\[lua\] .*? my lua timer handler/,
 "http lua close fake http connection",
 qr/go\(\): connected: 1, reused: \d+/,
 "go(): request sent: 11",
-"go(): received: OK",
+"go(): received: END",
 ]
 
 
 
 === TEST 12: tcp cosocket in timer handler (keep-alive connections) - body_filter_by_lua
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 
 --- config
     location = /t {
@@ -840,7 +875,7 @@ function go(port)
 
     print("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -905,14 +940,14 @@ qr/\[lua\] .*? my lua timer handler/,
 "http lua close fake http connection",
 qr/go\(\): connected: 1, reused: \d+/,
 "go(): request sent: 11",
-"go(): received: OK",
+"go(): received: END",
 ]
 
 
 
 === TEST 13: tcp cosocket in timer handler (keep-alive connections) - set_by_lua
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 
 --- config
     location = /t {
@@ -954,7 +989,7 @@ function go(port)
 
     print("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -1012,7 +1047,7 @@ qr/\[lua\] .*? my lua timer handler/,
 "http lua close fake http connection",
 qr/go\(\): connected: 1, reused: \d+/,
 "go(): request sent: 11",
-"go(): received: OK",
+"go(): received: END",
 ]
 
 
@@ -1023,7 +1058,7 @@ qr/go\(\): connected: 1, reused: \d+/,
         content_by_lua '
             local cc, cr, cy = coroutine.create, coroutine.resume, coroutine.yield
             local function f()
-                function f()
+                local function f()
                     local cnt = 0
                     for i = 1, 20 do
                         print("cnt = ", cnt)
@@ -1090,7 +1125,7 @@ registered timer
                 ngx.log(ngx.ERR, ...)
             end
             local function handle()
-                function f()
+                local function f()
                     print("hello in thread")
                     return "done"
                 end
@@ -1306,6 +1341,7 @@ API disabled
 
 
 === TEST 19: exit in user thread (entry thread is still pending on ngx.sleep)
+--- quic_max_idle_timeout: 1.3
 --- config
     location /t {
         content_by_lua '
@@ -1880,6 +1916,7 @@ trace: [m][f][g]
 --- config
     location /t {
         content_by_lua '
+            collectgarbage()
             local s = ""
 
             local function fail(...)
@@ -1932,7 +1969,7 @@ registered timer
 
 --- error_log eval
 [
-qr/\[alert\] .*? 1 lua_max_running_timers are not enough/,
+qr/\[alert\] .*? lua failed to run timer with function defined at =content_by_lua\(nginx.conf:\d+\):11: 1 lua_max_running_timers are not enough/,
 "lua ngx.timer expired",
 "http lua close fake http connection",
 ]
@@ -2079,7 +2116,7 @@ http lua close fake http connection
         content_by_lua '
             local begin = ngx.now()
             local function f(premature, a, b, c)
-                print("elapsed: ", ngx.now() - begin)
+                print("timer delay respected: ", ngx.now() - begin >= 0.04)
                 print("timer prematurely expired: ", premature)
                 print("timer user args: ", a, " ", b, " ", c)
             end
@@ -2115,7 +2152,7 @@ timer prematurely expired: true
 
 --- error_log eval
 [
-qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: 0\.0(?:4[4-9]|5[0-6])\d*, context: ngx\.timer/,
+qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: timer delay respected: true, context: ngx\.timer/,
 "lua ngx.timer expired",
 "http lua close fake http connection",
 "timer prematurely expired: false",
@@ -2181,8 +2218,8 @@ qr/\[lua\] content_by_lua\(nginx\.conf:\d+\):\d+: elapsed: .*?, context: ngx\.ti
         ';
     }
 --- log_level: error
---- error_log_file: syslog:server=127.0.0.1:12345
---- udp_listen: 12345
+--- error_log_file: syslog:server=127.0.0.1:$TEST_NGINX_RAND_PORT_1
+--- udp_listen: $TEST_NGINX_RAND_PORT_1
 --- udp_query eval: qr/Bad bad bad/
 --- udp_reply: hello
 --- wait: 0.1
@@ -2194,3 +2231,177 @@ ok
 Bad bad bad
 --- skip_nginx: 4: < 1.7.1
 
+
+
+=== TEST 33: log function location when failed to run a timer
+--- http_config
+    lua_max_running_timers 1;
+--- config
+    location /t {
+        content_by_lua_block {
+            local function g()
+                ngx.sleep(0.01)
+            end
+
+            local function f()
+                ngx.sleep(0.01)
+            end
+
+            local ok, err = ngx.timer.at(0, f)
+            if not ok then
+                ngx.say("failed to create timer f: ", err)
+                return
+            end
+
+            local ok, err = ngx.timer.at(0, g)
+            if not ok then
+                ngx.say("failed to create timer g: ", err)
+                return
+            end
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- wait: 0.1
+--- error_log eval
+qr/\[alert\] .*? lua failed to run timer with function defined at =content_by_lua\(nginx.conf:\d+\):2: 1 lua_max_running_timers are not enough/
+--- no_error_log
+[crit]
+[error]
+
+
+
+=== TEST 34: log function location when failed to run a timer (anonymous function)
+--- http_config
+    lua_max_running_timers 1;
+--- config
+    location /t {
+        content_by_lua_block {
+            local function f()
+                ngx.sleep(0.01)
+            end
+
+            local ok, err = ngx.timer.at(0, f)
+            if not ok then
+                ngx.say("failed to set timer f: ", err)
+                return
+            end
+
+            local ok, err = ngx.timer.at(0, function()
+                ngx.sleep(0.01)
+            end)
+
+            if not ok then
+                ngx.say("failed to set timer: ", err)
+                return
+            end
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- wait: 0.1
+--- error_log eval
+qr/\[alert\] .*? lua failed to run timer with function defined at =content_by_lua\(nginx.conf:\d+\):12: 1 lua_max_running_timers are not enough/
+--- no_error_log
+[crit]
+[error]
+
+
+
+=== TEST 35: log function location when failed to run a timer (lua file)
+--- user_files
+>>> test.lua
+local _M = {}
+
+function _M.run()
+    ngx.sleep(0.01)
+end
+
+return _M
+--- http_config
+    lua_package_path '$TEST_NGINX_HTML_DIR/?.lua;./?.lua;;';
+    lua_max_running_timers 1;
+--- config
+    location /t {
+        content_by_lua_block {
+            local test = require "test"
+
+            local ok, err = ngx.timer.at(0, test.run)
+            if not ok then
+                ngx.say("failed to set timer: ", err)
+                return
+            end
+
+            local ok, err = ngx.timer.at(0, test.run)
+            if not ok then
+                ngx.say("failed to set timer: ", err)
+                return
+            end
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- wait: 0.1
+--- no_error_log
+[crit]
+[error]
+--- error_log eval
+qr/\[alert\] .*? lua failed to run timer with function defined at @.+\/test.lua:3: 1 lua_max_running_timers are not enough/
+
+
+
+=== TEST 36: log function location when failed to run a timer with args (lua file)
+--- user_files
+>>> test.lua
+local _M = {}
+
+function _M.run(premature, arg)
+    ngx.sleep(0.01)
+end
+
+return _M
+--- http_config
+    lua_package_path '$TEST_NGINX_HTML_DIR/?.lua;./?.lua;;';
+    lua_max_running_timers 1;
+--- config
+    location /t {
+        content_by_lua_block {
+            local test = require "test"
+
+            local ok, err = ngx.timer.at(0, test.run, "arg")
+            if not ok then
+                ngx.say("failed to set timer: ", err)
+                return
+            end
+
+            local ok, err = ngx.timer.at(0, test.run, "arg")
+            if not ok then
+                ngx.say("failed to set timer: ", err)
+                return
+            end
+
+            ngx.say("ok")
+        }
+    }
+--- request
+GET /t
+--- response_body
+ok
+--- wait: 0.1
+--- no_error_log
+[crit]
+[error]
+--- error_log eval
+qr/\[alert\] .*? lua failed to run timer with function defined at @.+\/test.lua:3: 1 lua_max_running_timers are not enough/

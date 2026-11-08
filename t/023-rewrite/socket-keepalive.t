@@ -27,7 +27,7 @@ __DATA__
 
 === TEST 1: sanity
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 --- config
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -54,7 +54,7 @@ function go(port)
 
     ngx.say("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -81,10 +81,10 @@ GET /t
 --- response_body_like
 ^connected: 1, reused: \d+
 request sent: 11
-received: OK
+received: END
 connected: 1, reused: [1-9]\d*
 request sent: 11
-received: OK
+received: END
 --- no_error_log eval
 ["[error]",
 "lua tcp socket keepalive: free connection pool for "]
@@ -104,7 +104,7 @@ lua tcp socket get keepalive peer: using connection
 
 === TEST 2: free up the whole connection pool if no active connections
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 --- config
     location /t {
         set $port $TEST_NGINX_MEMCACHED_PORT;
@@ -133,7 +133,7 @@ function go(port, keepalive)
 
     ngx.say("connected: ", ok, ", reused: ", sock:getreusedtimes())
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -163,10 +163,10 @@ end
 --- response_body_like
 ^connected: 1, reused: \d+
 request sent: 11
-received: OK
+received: END
 connected: 1, reused: [1-9]\d*
 request sent: 11
-received: OK
+received: END
 --- no_error_log
 [error]
 --- error_log eval
@@ -176,8 +176,9 @@ received: OK
 
 
 === TEST 3: upstream sockets close prematurely
+--- no_http3
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 --- config
    server_tokens off;
    keepalive_timeout 100ms;
@@ -253,8 +254,9 @@ done
 
 
 === TEST 4: http keepalive
+--- no_http3
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 --- config
    server_tokens off;
    location /t {
@@ -330,6 +332,7 @@ done
 
 
 === TEST 5: lua_socket_keepalive_timeout
+--- quic_max_idle_timeout: 1.1
 --- config
    server_tokens off;
    location /t {
@@ -409,6 +412,7 @@ qr/lua tcp socket connection pool size: 30\b/]
 
 
 === TEST 6: lua_socket_pool_size
+--- quic_max_idle_timeout: 1.1
 --- config
    server_tokens off;
    location /t {
@@ -489,6 +493,7 @@ qr/lua tcp socket connection pool size: 1\b/]
 
 
 === TEST 7: "lua_socket_keepalive_timeout 0" means unlimited
+--- quic_max_idle_timeout: 1.2
 --- config
    server_tokens off;
    location /t {
@@ -571,6 +576,7 @@ lua tcp socket keepalive timeout: unlimited
 
 
 === TEST 8: setkeepalive(timeout) overrides lua_socket_keepalive_timeout
+--- quic_max_idle_timeout: 1.1
 --- config
    server_tokens off;
    location /t {
@@ -650,6 +656,7 @@ qr/lua tcp socket connection pool size: 30\b/]
 
 
 === TEST 9: sock:setkeepalive(timeout, size) overrides lua_socket_pool_size
+--- quic_max_idle_timeout: 1.1
 --- config
    server_tokens off;
    location /t {
@@ -730,6 +737,7 @@ qr/lua tcp socket connection pool size: 25\b/]
 
 
 === TEST 10: sock:keepalive_timeout(0) means unlimited
+--- quic_max_idle_timeout: 1.1
 --- config
    server_tokens off;
    location /t {
@@ -784,6 +792,7 @@ qr/lua tcp socket connection pool size: 25\b/]
     }
 
     location /foo {
+        keepalive_timeout 60s;
         echo foo;
     }
 
@@ -815,7 +824,7 @@ lua tcp socket keepalive timeout: unlimited
 === TEST 11: sanity (uds)
 --- http_config eval
 "
-    lua_package_path '$::HtmlDir/?.lua;./?.lua';
+    lua_package_path '$::HtmlDir/?.lua;./?.lua;;';
     server {
         listen unix:$::HtmlDir/nginx.sock;
         default_type 'text/plain';
@@ -903,7 +912,7 @@ lua tcp socket get keepalive peer: using connection
 
 
 
-=== TEST 12: github issue #108: ngx.locaiton.capture + redis.set_keepalive
+=== TEST 12: github issue #108: ngx.location.capture + redis.set_keepalive
 --- http_config eval
     qq{
         lua_package_path "$::HtmlDir/?.lua;;";
@@ -930,7 +939,7 @@ lua tcp socket get keepalive peer: using connection
 >>> t.lua
 local sock, err = ngx.socket.connect("127.0.0.1", ngx.var.port)
 if not sock then ngx.say(err) return end
-sock:send("flush_all\r\n")
+sock:send("get __nil\r\n")
 sock:receive()
 sock:setkeepalive()
 
@@ -953,7 +962,7 @@ lua tcp socket get keepalive peer: using connection
 
 === TEST 13: github issue #110: ngx.exit with HTTP_NOT_FOUND causes worker process to exit
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
 --- config
     error_page 404 /404.html;
     location /t {
@@ -980,7 +989,7 @@ function go(port)
         return
     end
 
-    local req = "flush_all\r\n"
+    local req = "get __nil\r\n"
 
     local bytes, err = sock:send(req)
     if not bytes then
@@ -1007,4 +1016,3 @@ Not found, dear...
 --- error_code: 404
 --- no_error_log
 [error]
-
